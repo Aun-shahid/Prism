@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # --- Scraper ---
     SCRAPER_INTERVAL_HOURS: int = 12
 
+    # --- CORS Allowed Origins ---
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

@@ -6,6 +6,7 @@ from .database import get_database, client
 from .routers import auth, users, api_keys, profile, applications, resume, scraper, gmail, jobs
 from .services.logging_service import get_logger
 from .services.scheduler import run_background_scheduler
+from .config import settings
 
 logger = get_logger("main")
 
@@ -38,9 +39,11 @@ app = FastAPI(
 )
 
 # CORS Middleware setup
+origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust this to specific frontend URL in production
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
