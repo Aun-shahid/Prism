@@ -37,6 +37,31 @@ export interface ScraperTargetUpdatePayload {
   is_active?: boolean;
 }
 
+export interface GeneralScraperSource {
+  id: string;
+  name: string;
+  url: string;
+  source_type: string; // "rss", "preset_linkedin", "preset_arbeitnow"
+  locations: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralScraperSourceCreatePayload {
+  name: string;
+  url: string;
+  source_type: string;
+  locations: string[];
+}
+
+export interface GeneralScraperSourceUpdatePayload {
+  name?: string;
+  url?: string;
+  locations?: string[];
+  is_active?: boolean;
+}
+
 export const scraperService = {
   async listTargets(): Promise<ScraperTarget[]> {
     const response = await api.get<ScraperTarget[]>('/scraper/targets');
@@ -71,6 +96,30 @@ export const scraperService = {
 
   async markJobRead(jobId: string): Promise<ScrapedJob> {
     const response = await api.patch<ScrapedJob>(`/scraper/jobs/${jobId}/read`);
+    return response.data;
+  },
+
+  async listGeneralSources(): Promise<GeneralScraperSource[]> {
+    const response = await api.get<GeneralScraperSource[]>('/scraper/general-sources');
+    return response.data;
+  },
+
+  async addGeneralSource(payload: GeneralScraperSourceCreatePayload): Promise<GeneralScraperSource> {
+    const response = await api.post<GeneralScraperSource>('/scraper/general-sources', payload);
+    return response.data;
+  },
+
+  async updateGeneralSource(id: string, payload: GeneralScraperSourceUpdatePayload): Promise<GeneralScraperSource> {
+    const response = await api.patch<GeneralScraperSource>(`/scraper/general-sources/${id}`, payload);
+    return response.data;
+  },
+
+  async deleteGeneralSource(id: string): Promise<void> {
+    await api.delete(`/scraper/general-sources/${id}`);
+  },
+
+  async triggerGeneralScrape(id: string): Promise<ScrapedJob[]> {
+    const response = await api.post<ScrapedJob[]>(`/scraper/general-sources/${id}/scrape`);
     return response.data;
   },
 };

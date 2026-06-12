@@ -36,6 +36,12 @@ export interface Certification {
   url?: string;
 }
 
+export interface JobPreferences {
+  onsite: string[];
+  remote: string[];
+  hybrid: string[];
+}
+
 export interface UserProfile {
   id: string;
   user_id: string;
@@ -53,6 +59,7 @@ export interface UserProfile {
   projects: Project[];
   certifications: Certification[];
   languages: string[];
+  job_preferences: JobPreferences;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +79,7 @@ export interface ProfileUpdatePayload {
   projects?: Project[];
   certifications?: Certification[];
   languages?: string[];
+  job_preferences?: JobPreferences;
 }
 
 export const profileService = {

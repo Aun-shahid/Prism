@@ -39,6 +39,12 @@ class Certification(BaseModel):
     url: Optional[str] = None
 
 
+class JobPreferences(BaseModel):
+    onsite: List[str] = []
+    remote: List[str] = []
+    hybrid: List[str] = []
+
+
 class UserProfile(BaseModel):
     id: Optional[str] = Field(default=None, alias="_id")
     user_id: str
@@ -56,6 +62,7 @@ class UserProfile(BaseModel):
     projects: List[Project] = []
     certifications: List[Certification] = []
     languages: List[str] = []
+    job_preferences: JobPreferences = JobPreferences()
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -79,6 +86,7 @@ class ProfileUpdateRequest(BaseModel):
     projects: Optional[List[Project]] = None
     certifications: Optional[List[Certification]] = None
     languages: Optional[List[str]] = None
+    job_preferences: Optional[JobPreferences] = None
 
 
 class ProfileResponse(BaseModel):
@@ -98,6 +106,7 @@ class ProfileResponse(BaseModel):
     projects: List[Project] = []
     certifications: List[Certification] = []
     languages: List[str] = []
+    job_preferences: JobPreferences = JobPreferences()
     created_at: datetime
     updated_at: datetime
 

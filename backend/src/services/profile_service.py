@@ -50,6 +50,7 @@ class ProfileService:
             "projects": [],
             "certifications": [],
             "languages": [],
+            "job_preferences": {"onsite": [], "remote": [], "hybrid": []},
             "created_at": now,
             "updated_at": now,
         }
@@ -71,12 +72,15 @@ class ProfileService:
             return profile
 
         # Convert nested Pydantic models to dicts for MongoDB
-        for key in ["education", "work_experience", "projects", "certifications"]:
+        for key in ["education", "work_experience", "projects", "certifications", "job_preferences"]:
             if key in update_dict and update_dict[key] is not None:
-                update_dict[key] = [
-                    item.model_dump() if hasattr(item, "model_dump") else item
-                    for item in update_dict[key]
-                ]
+                if key == "job_preferences":
+                    update_dict[key] = update_dict[key].model_dump() if hasattr(update_dict[key], "model_dump") else update_dict[key]
+                else:
+                    update_dict[key] = [
+                        item.model_dump() if hasattr(item, "model_dump") else item
+                        for item in update_dict[key]
+                    ]
 
         update_dict["updated_at"] = datetime.utcnow()
 

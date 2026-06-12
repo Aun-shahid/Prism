@@ -1,9 +1,11 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import get_database, client
 from .routers import auth, users, api_keys, profile, applications, resume, scraper, gmail, jobs
 from .services.logging_service import get_logger
+from .services.scheduler import run_background_scheduler
 
 logger = get_logger("main")
 
@@ -15,6 +17,10 @@ async def lifespan(app: FastAPI):
         # Verify MongoDB is reachable
         await db.command("ping")
         logger.info("Database connection successfully verified via ping!")
+        
+        # Start background scheduler
+        asyncio.create_task(run_background_scheduler())
+        logger.info("Background scheduler initialized.")
     except Exception as e:
         logger.error(f"Database connection verification failed: {e}")
         raise e

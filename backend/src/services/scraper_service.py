@@ -6,12 +6,22 @@ from fastapi import HTTPException, status
 import httpx
 from bs4 import BeautifulSoup
 
-from ..database import get_scraper_targets_collection, get_scraped_jobs_collection, get_profiles_collection
+from ..database import (
+    get_scraper_targets_collection,
+    get_scraped_jobs_collection,
+    get_profiles_collection,
+    get_general_sources_collection,
+)
 from ..models.scraper import (
     ScraperTarget,
     ScrapedJob,
     ScraperTargetCreateRequest,
     ScraperTargetUpdateRequest,
+)
+from ..models.general_sources import (
+    GeneralScraperSource,
+    GeneralScraperSourceCreateRequest,
+    GeneralScraperSourceUpdateRequest,
 )
 from .logging_service import get_logger
 
@@ -267,3 +277,72 @@ class ScraperService:
 
         result["_id"] = str(result["_id"])
         return ScrapedJob(**result)
+
+    @staticmethod
+    async def list_general_sources() -> List[GeneralScraperSource]:
+        """List all general scraper sources."""
+        collection = get_general_sources_collection()
+        cursor = collection.find({}).sort("created_at", -1)
+        sources = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            sources.append(GeneralScraperSource(**doc))
+        return sources
+
+    @staticmethod
+    async def add_general_source(data: GeneralScraperSourceCreateRequest) -> GeneralScraperSource:
+        """Register a new general scraper source."""
+        collection = get_general_sources_collection()
+        now = datetime.utcnow()
+        doc = {
+            "name": data.name,
+            "url": data.url,
+            "source_type": data.source_type,
+            "is_active": True,
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await collection.insert_one(doc)
+        doc["_id"] = str(result.inserted_id)
+        logger.info(f"Added general scraper source '{data.name}'")
+        return GeneralScraperSource(**doc)
+
+    @staticmethod
+    async def update_general_source(
+        source_id: str, data: GeneralScraperSourceUpdateRequest
+    ) -> GeneralScraperSource:
+        """Update a general scraper source."""
+        collection = get_general_sources_collection()
+        try:
+            oid = ObjectId(source_id)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid source ID")
+
+        update_dict = data.model_dump(exclude_unset=True)
+        update_dict["updated_at"] = datetime.utcnow()
+
+        result = await collection.update_one(
+            {"_id": oid},
+            {"$set": update_dict}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
+        doc = await collection.find_one({"_id": oid})
+        doc["_id"] = str(doc["_id"])
+        return GeneralScraperSource(**doc)
+
+    @staticmethod
+    async def remove_general_source(source_id: str) -> bool:
+        """Remove a general scraper source."""
+        collection = get_general_sources_collection()
+        try:
+            oid = ObjectId(source_id)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid source ID")
+
+        result = await collection.delete_one({"_id": oid})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+        logger.info(f"Removed general scraper source {source_id}")
+        return True

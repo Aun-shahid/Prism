@@ -6,9 +6,14 @@ from ..models.scraper import (
     ScraperTargetResponse,
     ScrapedJobResponse,
 )
+from ..models.general_sources import (
+    GeneralScraperSourceCreateRequest,
+    GeneralScraperSourceUpdateRequest,
+    GeneralScraperSourceResponse,
+)
 from ..models.users import User
 from ..services.scraper_service import ScraperService
-from ..auth.dependencies import get_current_active_user
+from ..auth.dependencies import get_current_active_user, require_super_admin
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
@@ -85,3 +90,56 @@ async def mark_job_read(
     """Mark a discovered job as read."""
     job = await ScraperService.mark_job_read(current_user.id, job_id)
     return job
+
+
+# --- General Sources ---
+
+@router.get("/general-sources", response_model=List[GeneralScraperSourceResponse])
+async def list_general_sources(
+    admin_user: User = Depends(require_super_admin),
+):
+    """List all general scraper sources (Admin only)."""
+    sources = await ScraperService.list_general_sources()
+    return sources
+
+
+@router.post("/general-sources", response_model=GeneralScraperSourceResponse, status_code=status.HTTP_201_CREATED)
+async def add_general_source(
+    data: GeneralScraperSourceCreateRequest,
+    admin_user: User = Depends(require_super_admin),
+):
+    """Add a new general scraper source (Admin only)."""
+    source = await ScraperService.add_general_source(data)
+    return source
+
+
+@router.patch("/general-sources/{source_id}", response_model=GeneralScraperSourceResponse)
+async def update_general_source(
+    source_id: str,
+    data: GeneralScraperSourceUpdateRequest,
+    admin_user: User = Depends(require_super_admin),
+):
+    """Update a general scraper source (Admin only)."""
+    source = await ScraperService.update_general_source(source_id, data)
+    return source
+
+
+@router.delete("/general-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_general_source(
+    source_id: str,
+    admin_user: User = Depends(require_super_admin),
+):
+    """Remove a general scraper source (Admin only)."""
+    await ScraperService.remove_general_source(source_id)
+    return None
+
+
+@router.post("/general-sources/{source_id}/scrape", response_model=List[ScrapedJobResponse])
+async def trigger_general_scrape(
+    source_id: str,
+    admin_user: User = Depends(require_super_admin),
+):
+    """Manually trigger a scrape for a specific general source for the current admin user (Admin only)."""
+    from ..services.general_scraper_service import GeneralScraperService
+    jobs = await GeneralScraperService.scrape_single_source_for_user(admin_user.id, source_id)
+    return jobs

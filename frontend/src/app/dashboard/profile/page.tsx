@@ -33,7 +33,11 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   Divider,
-  Paper
+  Paper,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
@@ -45,6 +49,8 @@ import SchoolIcon from '@mui/icons-material/School';
 import CodeIcon from '@mui/icons-material/Code';
 import CardMembershipIcon from '@mui/icons-material/CardMembership';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import { Country, State, City } from 'country-state-city';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = React.useState(0);
@@ -64,6 +70,13 @@ export default function ProfilePage() {
   // CV Upload state & ref
   const [uploading, setUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Preference builder state
+  const [prefMode, setPrefMode] = React.useState<'onsite' | 'remote' | 'hybrid'>('onsite');
+  const [prefCountry, setPrefCountry] = React.useState('');
+  const [prefState, setPrefState] = React.useState('');
+  const [prefCity, setPrefCity] = React.useState('');
+  const [savingPrefs, setSavingPrefs] = React.useState(false);
   
   // Form states for adding items
   const [workForm, setWorkForm] = React.useState<WorkExperience>({
@@ -240,6 +253,68 @@ export default function ProfilePage() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  // --- Preference Handlers ---
+  const handleAddPreference = () => {
+    if (!profile || !prefCountry) return;
+    
+    const countryObj = Country.getCountryByCode(prefCountry);
+    const countryName = countryObj ? countryObj.name : '';
+    
+    let stateName = '';
+    if (prefState) {
+      const stateObj = State.getStateByCodeAndCountry(prefState, prefCountry);
+      stateName = stateObj ? stateObj.name : '';
+    }
+    
+    let cityName = prefCity;
+    
+    let locString = countryName;
+    if (stateName) locString = `${stateName}, ${locString}`;
+    if (cityName) locString = `${cityName}, ${locString}`;
+    
+    const currentList = profile.job_preferences?.[prefMode] || [];
+    if (currentList.includes(locString)) return;
+    
+    const updatedPrefs = {
+      ...profile.job_preferences,
+      [prefMode]: [...currentList, locString]
+    };
+    
+    setProfile(prev => prev ? { ...prev, job_preferences: updatedPrefs } : null);
+    
+    setPrefCountry('');
+    setPrefState('');
+    setPrefCity('');
+  };
+
+  const handleRemovePreference = (mode: 'onsite' | 'remote' | 'hybrid', loc: string) => {
+    if (!profile) return;
+    const currentList = profile.job_preferences?.[mode] || [];
+    const updatedPrefs = {
+      ...profile.job_preferences,
+      [mode]: currentList.filter(l => l !== loc)
+    };
+    setProfile(prev => prev ? { ...prev, job_preferences: updatedPrefs } : null);
+  };
+
+  const handleSavePreferences = async () => {
+    if (!profile) return;
+    setSavingPrefs(true);
+    setSuccess(null);
+    setError(null);
+    try {
+      const updated = await profileService.updateProfile({
+        job_preferences: profile.job_preferences
+      });
+      setProfile(updated);
+      setSuccess('Job location preferences updated successfully.');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save job preferences.');
+    } finally {
+      setSavingPrefs(false);
     }
   };
 
@@ -435,6 +510,7 @@ export default function ProfilePage() {
           <Tab icon={<CodeIcon />} label="Projects" />
           <Tab icon={<SchoolIcon />} label="Education" />
           <Tab icon={<CardMembershipIcon />} label="Skills, Titles & Certs" />
+          <Tab icon={<LocationOnIcon />} label="Job Preferences" />
         </Tabs>
       </Paper>
 
@@ -794,6 +870,183 @@ export default function ProfilePage() {
             </Card>
           </Grid>
         </Grid>
+      )}
+
+      {/* Tab 5: Job Preferences */}
+      {activeTab === 5 && (
+        <Box>
+          <Grid container spacing={3}>
+            {/* Preferences Builder Form */}
+            <Grid size={{ xs: 12, md: 5 }}>
+              <Card sx={{ height: '100%' }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Location Preference Builder</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 3 }}>
+                    Construct and add target geographic locations for each work mode preference.
+                  </Typography>
+                  
+                  <Stack spacing={3}>
+                    {/* Select Work Mode */}
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="pref-mode-label">Work Mode</InputLabel>
+                      <Select
+                        labelId="pref-mode-label"
+                        label="Work Mode"
+                        value={prefMode}
+                        onChange={(e) => setPrefMode(e.target.value as any)}
+                      >
+                        <MenuItem value="onsite">Onsite</MenuItem>
+                        <MenuItem value="remote">Remote</MenuItem>
+                        <MenuItem value="hybrid">Hybrid</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    {/* Select Country */}
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="pref-country-label">Country</InputLabel>
+                      <Select
+                        labelId="pref-country-label"
+                        label="Country"
+                        value={prefCountry}
+                        onChange={(e) => {
+                          setPrefCountry(e.target.value);
+                          setPrefState('');
+                          setPrefCity('');
+                        }}
+                      >
+                        <MenuItem value="">-- Select Country --</MenuItem>
+                        {Country.getAllCountries().map(c => (
+                          <MenuItem key={c.isoCode} value={c.isoCode}>{c.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    {/* Select State (Conditional) */}
+                    <FormControl fullWidth size="small" disabled={!prefCountry}>
+                      <InputLabel id="pref-state-label">State / Region (Optional)</InputLabel>
+                      <Select
+                        labelId="pref-state-label"
+                        label="State / Region (Optional)"
+                        value={prefState}
+                        onChange={(e) => {
+                          setPrefState(e.target.value);
+                          setPrefCity('');
+                        }}
+                      >
+                        <MenuItem value="">-- Select State --</MenuItem>
+                        {prefCountry && State.getStatesOfCountry(prefCountry).map(s => (
+                          <MenuItem key={s.isoCode} value={s.isoCode}>{s.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    {/* Select City (Conditional) */}
+                    <FormControl fullWidth size="small" disabled={!prefState}>
+                      <InputLabel id="pref-city-label">City (Optional)</InputLabel>
+                      <Select
+                        labelId="pref-city-label"
+                        label="City (Optional)"
+                        value={prefCity}
+                        onChange={(e) => setPrefCity(e.target.value)}
+                      >
+                        <MenuItem value="">-- Select City --</MenuItem>
+                        {prefCountry && prefState && City.getCitiesOfState(prefCountry, prefState).map(c => (
+                          <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    <Button 
+                      variant="contained" 
+                      onClick={handleAddPreference}
+                      disabled={!prefCountry}
+                      sx={{ py: 1 }}
+                    >
+                      Add to {prefMode.toUpperCase()} list
+                    </Button>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Display preferences lists */}
+            <Grid size={{ xs: 12, md: 7 }}>
+              <Stack spacing={3}>
+                {/* Onsite Card */}
+                <Card>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="subtitle1" color="primary.main" sx={{ fontWeight: 800, mb: 1.5 }}>
+                      Onsite Job Locations
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {!profile?.job_preferences?.onsite || profile.job_preferences.onsite.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          No onsite locations configured. (e.g., "Pakistan")
+                        </Typography>
+                      ) : (
+                        profile.job_preferences.onsite.map(loc => (
+                          <Chip key={loc} label={loc} onDelete={() => handleRemovePreference('onsite', loc)} color="primary" variant="outlined" />
+                        ))
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+
+                {/* Remote Card */}
+                <Card>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="subtitle1" color="secondary.main" sx={{ fontWeight: 800, mb: 1.5 }}>
+                      Remote Job Locations
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {!profile?.job_preferences?.remote || profile.job_preferences.remote.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          No remote locations configured. (e.g., "Saudi Arabia")
+                        </Typography>
+                      ) : (
+                        profile.job_preferences.remote.map(loc => (
+                          <Chip key={loc} label={loc} onDelete={() => handleRemovePreference('remote', loc)} color="secondary" variant="outlined" />
+                        ))
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+
+                {/* Hybrid Card */}
+                <Card>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#f59e0b' }}>
+                      Hybrid Job Locations
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {!profile?.job_preferences?.hybrid || profile.job_preferences.hybrid.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          No hybrid locations configured. (e.g., "United Kingdom")
+                        </Typography>
+                      ) : (
+                        profile.job_preferences.hybrid.map(loc => (
+                          <Chip key={loc} label={loc} onDelete={() => handleRemovePreference('hybrid', loc)} sx={{ color: '#f59e0b', borderColor: '#f59e0b' }} variant="outlined" />
+                        ))
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+
+                {/* Save Changes button */}
+                <Button
+                  variant="contained"
+                  color="success"
+                  onClick={handleSavePreferences}
+                  disabled={savingPrefs}
+                  startIcon={savingPrefs ? <CircularProgress size={20} /> : <SaveIcon />}
+                  sx={{ py: 1.5, alignSelf: 'flex-start' }}
+                >
+                  Save Location Preferences
+                </Button>
+              </Stack>
+            </Grid>
+          </Grid>
+        </Box>
       )}
 
       {/* --- ADD DIALOGS --- */}

@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { scraperService, ScraperTarget, ScrapedJob } from '../../../services/scraper';
+import { scraperService, ScraperTarget, ScrapedJob, GeneralScraperSource } from '../../../services/scraper';
 import { applicationsService } from '../../../services/applications';
+import { useAuth } from '../../../hooks/useAuth';
 import {
   Box,
   Typography,
@@ -27,7 +28,13 @@ import {
   DialogActions,
   Divider,
   Tooltip,
-  Paper
+  Paper,
+  Tabs,
+  Tab,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -36,13 +43,20 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import DoneIcon from '@mui/icons-material/Done';
 import AddTaskIcon from '@mui/icons-material/AddTask';
 import SearchIcon from '@mui/icons-material/Search';
+import LanguageIcon from '@mui/icons-material/Language';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
+import EditIcon from '@mui/icons-material/Edit';
 
 export default function ScraperPage() {
   const [targets, setTargets] = React.useState<ScraperTarget[]>([]);
+  const [generalSources, setGeneralSources] = React.useState<GeneralScraperSource[]>([]);
   const [jobs, setJobs] = React.useState<ScrapedJob[]>([]);
   const [loadingTargets, setLoadingTargets] = React.useState(true);
   const [loadingJobs, setLoadingJobs] = React.useState(true);
+  const [loadingGeneral, setLoadingGeneral] = React.useState(true);
   const [scrapingId, setScrapingId] = React.useState<string | null>(null);
+  const [scrapingGeneralId, setScrapingGeneralId] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState(0);
   
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
@@ -56,6 +70,27 @@ export default function ScraperPage() {
   });
   const [keywordInput, setKeywordInput] = React.useState('');
 
+  // Dialog for Add General Source
+  const [openAddGeneralDialog, setOpenAddGeneralDialog] = React.useState(false);
+  const [generalForm, setGeneralForm] = React.useState({
+    name: '',
+    url: '',
+    source_type: 'rss',
+    locations: [] as string[]
+  });
+  const [locationInput, setLocationInput] = React.useState('');
+
+  // Dialog for Edit General Source
+  const [openEditGeneralDialog, setOpenEditGeneralDialog] = React.useState(false);
+  const [editGeneralForm, setEditGeneralForm] = React.useState({
+    id: '',
+    name: '',
+    url: '',
+    source_type: '',
+    locations: [] as string[]
+  });
+  const [editLocationInput, setEditLocationInput] = React.useState('');
+
   // Dialog for adding discovered job to application tracker
   const [openAppDialog, setOpenAppDialog] = React.useState(false);
   const [selectedJob, setSelectedJob] = React.useState<ScrapedJob | null>(null);
@@ -66,23 +101,34 @@ export default function ScraperPage() {
     notes: ''
   });
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'super_admin';
+
   const loadData = React.useCallback(async () => {
     setLoadingTargets(true);
     setLoadingJobs(true);
+    setLoadingGeneral(true);
     try {
-      const [targetsData, jobsData] = await Promise.all([
+      const promises = [
         scraperService.listTargets(),
-        scraperService.listDiscoveredJobs()
-      ]);
+        scraperService.listDiscoveredJobs(),
+        isAdmin ? scraperService.listGeneralSources() : Promise.resolve([])
+      ] as const;
+
+      const [targetsData, jobsData, generalData] = await Promise.all(promises);
       setTargets(targetsData);
       setJobs(jobsData);
+      if (isAdmin) {
+        setGeneralSources(generalData as GeneralScraperSource[]);
+      }
     } catch (err: any) {
       setError('Failed to fetch scraper information. Ensure backend is running.');
     } finally {
       setLoadingTargets(false);
       setLoadingJobs(false);
+      setLoadingGeneral(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   React.useEffect(() => {
     loadData();
@@ -159,10 +205,123 @@ export default function ScraperPage() {
     }
   };
 
+  // --- General Sources CRUD ---
+  const handleAddLocation = () => {
+    if (locationInput.trim() && !generalForm.locations.includes(locationInput.trim())) {
+      setGeneralForm(prev => ({ ...prev, locations: [...prev.locations, locationInput.trim()] }));
+      setLocationInput('');
+    }
+  };
+
+  const handleRemoveLocation = (loc: string) => {
+    setGeneralForm(prev => ({ ...prev, locations: prev.locations.filter(l => l !== loc) }));
+  };
+
+  const handleSaveGeneralSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await scraperService.addGeneralSource(generalForm);
+      setOpenAddGeneralDialog(false);
+      setGeneralForm({ name: '', url: '', source_type: 'rss', locations: [] });
+      setLocationInput('');
+      setSuccess('General scraper source added successfully.');
+      loadData();
+    } catch (err: any) {
+      setError('Failed to save general scraper source.');
+    }
+  };
+
+  const handleOpenEditGeneralDialog = (source: GeneralScraperSource) => {
+    setEditGeneralForm({
+      id: source.id,
+      name: source.name,
+      url: source.url,
+      source_type: source.source_type,
+      locations: source.locations || []
+    });
+    setEditLocationInput('');
+    setOpenEditGeneralDialog(true);
+  };
+
+  const handleAddEditLocation = () => {
+    if (editLocationInput.trim() && !editGeneralForm.locations.includes(editLocationInput.trim())) {
+      setEditGeneralForm(prev => ({ ...prev, locations: [...prev.locations, editLocationInput.trim()] }));
+      setEditLocationInput('');
+    }
+  };
+
+  const handleRemoveEditLocation = (loc: string) => {
+    setEditGeneralForm(prev => ({ ...prev, locations: prev.locations.filter(l => l !== loc) }));
+  };
+
+  const handleUpdateGeneralSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await scraperService.updateGeneralSource(editGeneralForm.id, {
+        name: editGeneralForm.name,
+        url: editGeneralForm.url,
+        locations: editGeneralForm.locations
+      });
+      setOpenEditGeneralDialog(false);
+      setSuccess('General scraper source updated successfully.');
+      loadData();
+    } catch (err: any) {
+      setError('Failed to update general scraper source.');
+    }
+  };
+
+  const handleDeleteGeneralSource = async (id: string) => {
+    if (!confirm('Are you sure you want to remove this general scraper source?')) return;
+    try {
+      await scraperService.deleteGeneralSource(id);
+      setSuccess('General source removed.');
+      loadData();
+    } catch (err: any) {
+      alert('Failed to delete general source.');
+    }
+  };
+
+  const handleToggleGeneralStatus = async (source: GeneralScraperSource) => {
+    try {
+      await scraperService.updateGeneralSource(source.id, { is_active: !source.is_active });
+      loadData();
+    } catch (err: any) {
+      alert('Failed to update general source status.');
+    }
+  };
+
+  const handleTriggerGeneralScrape = async (id: string) => {
+    setScrapingGeneralId(id);
+    setError(null);
+    setSuccess(null);
+    try {
+      const scraped = await scraperService.triggerGeneralScrape(id);
+      setSuccess(`General crawl complete! Found ${scraped.length} matching jobs.`);
+      loadData();
+    } catch (err: any) {
+      setError('Crawl completed but failed to parse feed. Check source URL access restrictions.');
+    } finally {
+      setScrapingGeneralId(null);
+    }
+  };
+
+  const getJobCompany = (job: ScrapedJob) => {
+    if (job.target_id === 'external') {
+      return job.description_snippet?.split(' | ')[0] || 'External Search Match';
+    }
+    if (job.target_id.startsWith('general_')) {
+      const platform = job.target_id.split('_').slice(1).join(' ');
+      const platformName = platform.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const descPart = job.description_snippet?.split(' | ')[0];
+      return descPart && descPart !== platformName ? `${descPart} (${platformName})` : platformName;
+    }
+    return targets.find(t => t.id === job.target_id)?.company_name || 'Scraper Target';
+  };
+
   const handleOpenAppDialog = (job: ScrapedJob) => {
     setSelectedJob(job);
     setAppForm({
-      company: targets.find(t => t.id === job.target_id)?.company_name || 'Target Company',
+      company: getJobCompany(job),
       position: job.title,
       job_url: job.url || '',
       notes: `Discovered automatically matching keywords: ${job.matched_keywords.join(', ')}`
@@ -198,87 +357,185 @@ export default function ScraperPage() {
     <Box>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-          Career Pages Scraper
+          Custom Job Scraper
         </Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          Define target company career urls and match keywords to discover open positions automatically.
+          Define company career portals and public job search feeds to discover open positions automatically.
         </Typography>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
 
+      {isAdmin && (
+        <Paper sx={{ mb: 4 }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={(_, val) => setActiveTab(val)}
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab icon={<LanguageIcon />} label="Company Targets" />
+            <Tab icon={<TravelExploreIcon />} label="General Platforms & RSS Feeds" />
+          </Tabs>
+        </Paper>
+      )}
+
       <Grid container spacing={3}>
         {/* Left Side: Targets Manager */}
         <Grid size={{ xs: 12, md: 5 }}>
-          <Card>
-            <CardContent sx={{ p: 3 }}>
-              <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>Scraper Targets</Typography>
-                <Button variant="outlined" startIcon={<AddIcon />} size="small" onClick={() => setOpenAddDialog(true)}>
-                  Add URL
-                </Button>
-              </Stack>
+          {!isAdmin || activeTab === 0 ? (
+            <Card>
+              <CardContent sx={{ p: 3 }}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>Scraper Targets</Typography>
+                  <Button variant="outlined" startIcon={<AddIcon />} size="small" onClick={() => setOpenAddDialog(true)}>
+                    Add URL
+                  </Button>
+                </Stack>
 
-              {loadingTargets ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
-              ) : targets.length === 0 ? (
-                <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 2 }}>
-                  No scraping targets configured. Add a website to monitor.
-                </Typography>
-              ) : (
-                <List>
-                  {targets.map((t) => (
-                    <Paper key={t.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box sx={{ maxWidth: '70%' }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{t.company_name}</Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            {t.career_url}
-                          </Typography>
-                          
-                          <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                            {t.keywords.map(kw => (
-                              <Chip key={kw} label={kw} size="small" variant="outlined" sx={{ height: 18, fontSize: '0.65rem' }} />
-                            ))}
+                {loadingTargets ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
+                ) : targets.length === 0 ? (
+                  <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 2 }}>
+                    No scraping targets configured. Add a website to monitor.
+                  </Typography>
+                ) : (
+                  <List>
+                    {targets.map((t) => (
+                      <Paper key={t.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Box sx={{ maxWidth: '70%' }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{t.company_name}</Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {t.career_url}
+                            </Typography>
+                            
+                            <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {t.keywords.map(kw => (
+                                <Chip key={kw} label={kw} size="small" variant="outlined" sx={{ height: 18, fontSize: '0.65rem' }} />
+                              ))}
+                            </Box>
                           </Box>
-                        </Box>
-                        
-                        <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
-                          <Switch 
-                            checked={t.is_active} 
-                            onChange={() => handleToggleTargetStatus(t)}
-                            size="small"
-                          />
-                          <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
-                            <Tooltip title="Run scraper now">
-                              <IconButton 
-                                size="small" 
-                                color="secondary" 
-                                onClick={() => handleTriggerScrape(t.id)}
-                                disabled={scrapingId !== null}
-                              >
-                                {scrapingId === t.id ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+                          
+                          <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
+                            <Switch 
+                              checked={t.is_active} 
+                              onChange={() => handleToggleTargetStatus(t)}
+                              size="small"
+                            />
+                            <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
+                              <Tooltip title="Run scraper now">
+                                <IconButton 
+                                  size="small" 
+                                  color="secondary" 
+                                  onClick={() => handleTriggerScrape(t.id)}
+                                  disabled={scrapingId !== null}
+                                >
+                                  {scrapingId === t.id ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+                                </IconButton>
+                              </Tooltip>
+                              <IconButton size="small" color="error" onClick={() => handleDeleteTarget(t.id)}>
+                                <DeleteIcon fontSize="small" />
                               </IconButton>
-                            </Tooltip>
-                            <IconButton size="small" color="error" onClick={() => handleDeleteTarget(t.id)}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
+                            </Stack>
                           </Stack>
                         </Stack>
-                      </Stack>
-                      
-                      {t.last_scraped && (
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
-                          Last scanned: {new Date(t.last_scraped).toLocaleString()}
-                        </Typography>
-                      )}
-                    </Paper>
-                  ))}
-                </List>
-              )}
-            </CardContent>
-          </Card>
+                        
+                        {t.last_scraped && (
+                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
+                            Last scanned: {new Date(t.last_scraped).toLocaleString()}
+                          </Typography>
+                        )}
+                      </Paper>
+                    ))}
+                  </List>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent sx={{ p: 3 }}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>General Sources & RSS</Typography>
+                  <Button variant="outlined" startIcon={<AddIcon />} size="small" onClick={() => setOpenAddGeneralDialog(true)}>
+                    Add Feed
+                  </Button>
+                </Stack>
+
+                {loadingGeneral ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
+                ) : generalSources.length === 0 ? (
+                  <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 2 }}>
+                    No general scraper sources configured.
+                  </Typography>
+                ) : (
+                  <List>
+                    {generalSources.map((s) => (
+                      <Paper key={s.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Box sx={{ maxWidth: '70%' }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{s.name}</Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {s.url}
+                            </Typography>
+                            
+                            <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              <Chip 
+                                label={s.source_type.toUpperCase().replace('PRESET_', '').replace('_', ' ')} 
+                                size="small" 
+                                color={s.source_type === 'rss' ? 'primary' : 'secondary'} 
+                                variant="outlined" 
+                                sx={{ height: 18, fontSize: '0.65rem' }} 
+                              />
+                              {s.locations && s.locations.map(loc => (
+                                <Chip 
+                                  key={loc}
+                                  label={loc}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ height: 18, fontSize: '0.65rem' }}
+                                />
+                              ))}
+                            </Box>
+                          </Box>
+                          
+                          <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
+                            <Switch 
+                              checked={s.is_active} 
+                              onChange={() => handleToggleGeneralStatus(s)}
+                              size="small"
+                            />
+                            <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
+                              <Tooltip title="Scan this platform now">
+                                <IconButton 
+                                  size="small" 
+                                  color="secondary" 
+                                  onClick={() => handleTriggerGeneralScrape(s.id)}
+                                  disabled={scrapingGeneralId !== null}
+                                >
+                                  {scrapingGeneralId === s.id ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Edit scraper source">
+                                <IconButton size="small" color="primary" onClick={() => handleOpenEditGeneralDialog(s)}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              {s.source_type === 'rss' && (
+                                <IconButton size="small" color="error" onClick={() => handleDeleteGeneralSource(s.id)}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </Stack>
+                          </Stack>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </List>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </Grid>
 
         {/* Right Side: Matched Job Postings Feed */}
@@ -300,7 +557,7 @@ export default function ScraperPage() {
               ) : (
                 <Stack spacing={2} sx={{ maxHeight: '70vh', overflowY: 'auto', pr: 1 }}>
                   {jobs.map((job) => {
-                    const company = targets.find(t => t.id === job.target_id)?.company_name || 'Target Company';
+                    const company = getJobCompany(job);
                     return (
                       <Paper 
                         key={job.id} 
@@ -459,6 +716,121 @@ export default function ScraperPage() {
           </DialogActions>
         </Box>
       </Dialog>
+      {/* Add General Source Dialog */}
+       <Dialog open={openAddGeneralDialog} onClose={() => setOpenAddGeneralDialog(false)} fullWidth maxWidth="sm">
+         <Box component="form" onSubmit={handleSaveGeneralSource}>
+           <DialogTitle sx={{ fontWeight: 800 }}>Add General Feed Source</DialogTitle>
+           <DialogContent dividers>
+             <Stack spacing={3} sx={{ mt: 1 }}>
+               <TextField 
+                 label="Feed Name" 
+                 placeholder="e.g. StackOverflow Jobs RSS"
+                 value={generalForm.name} 
+                 onChange={(e) => setGeneralForm(prev => ({ ...prev, name: e.target.value }))} 
+                 required 
+                 fullWidth 
+               />
+               <TextField 
+                 label="Feed / API URL" 
+                 placeholder="https://example.com/rss"
+                 value={generalForm.url} 
+                 onChange={(e) => setGeneralForm(prev => ({ ...prev, url: e.target.value }))} 
+                 required 
+                 fullWidth 
+               />
+               
+               <FormControl fullWidth>
+                 <InputLabel id="general-source-type-label">Feed Type</InputLabel>
+                 <Select
+                   labelId="general-source-type-label"
+                   label="Feed Type"
+                   value={generalForm.source_type}
+                   onChange={(e) => setGeneralForm(prev => ({ ...prev, source_type: e.target.value }))}
+                 >
+                   <MenuItem value="rss">RSS Feed (Standard XML)</MenuItem>
+                 </Select>
+               </FormControl>
+
+               <Box>
+                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>Target Locations (e.g. United Kingdom, Pakistan)</Typography>
+                 <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+                   <TextField 
+                     label="Add Location" 
+                     size="small" 
+                     value={locationInput} 
+                     onChange={(e) => setLocationInput(e.target.value)} 
+                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddLocation())}
+                     fullWidth 
+                   />
+                   <Button variant="outlined" onClick={handleAddLocation}>Add</Button>
+                 </Stack>
+                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                   {generalForm.locations.map((loc, i) => (
+                     <Chip key={i} label={loc} onDelete={() => handleRemoveLocation(loc)} size="small" />
+                   ))}
+                 </Box>
+               </Box>
+             </Stack>
+           </DialogContent>
+           <DialogActions sx={{ p: 3 }}>
+             <Button onClick={() => setOpenAddGeneralDialog(false)}>Cancel</Button>
+             <Button variant="contained" type="submit">Save Source</Button>
+           </DialogActions>
+         </Box>
+       </Dialog>
+
+       {/* Edit General Source Dialog */}
+       <Dialog open={openEditGeneralDialog} onClose={() => setOpenEditGeneralDialog(false)} fullWidth maxWidth="sm">
+         <Box component="form" onSubmit={handleUpdateGeneralSource}>
+           <DialogTitle sx={{ fontWeight: 800 }}>Edit General Feed Source</DialogTitle>
+           <DialogContent dividers>
+             <Stack spacing={3} sx={{ mt: 1 }}>
+               <TextField 
+                 label="Feed Name" 
+                 placeholder="e.g. LinkedIn"
+                 value={editGeneralForm.name} 
+                 onChange={(e) => setEditGeneralForm(prev => ({ ...prev, name: e.target.value }))} 
+                 required 
+                 disabled={!editGeneralForm.source_type.includes('rss')}
+                 fullWidth 
+               />
+               <TextField 
+                 label="Feed / API URL" 
+                 placeholder="https://example.com/rss"
+                 value={editGeneralForm.url} 
+                 onChange={(e) => setEditGeneralForm(prev => ({ ...prev, url: e.target.value }))} 
+                 required 
+                 disabled={!editGeneralForm.source_type.includes('rss')}
+                 fullWidth 
+               />
+               
+               <Box>
+                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>Target Locations (e.g. United Kingdom, Pakistan)</Typography>
+                 <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+                   <TextField 
+                     label="Add Location" 
+                     size="small" 
+                     value={editLocationInput} 
+                     onChange={(e) => setEditLocationInput(e.target.value)} 
+                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditLocation())}
+                     fullWidth 
+                   />
+                   <Button variant="outlined" onClick={handleAddEditLocation}>Add</Button>
+                 </Stack>
+                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                   {editGeneralForm.locations.map((loc, i) => (
+                     <Chip key={i} label={loc} onDelete={() => handleRemoveEditLocation(loc)} size="small" />
+                   ))}
+                 </Box>
+               </Box>
+             </Stack>
+           </DialogContent>
+           <DialogActions sx={{ p: 3 }}>
+             <Button onClick={() => setOpenEditGeneralDialog(false)}>Cancel</Button>
+             <Button variant="contained" type="submit" color="primary">Save Changes</Button>
+           </DialogActions>
+         </Box>
+       </Dialog>
     </Box>
   );
 }

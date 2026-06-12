@@ -52,3 +52,6 @@ def get_email_logs_collection():
     database = get_database()
     return database["email_logs"]
 
+def get_general_sources_collection():
+    database = get_database()
+    return database["general_scraper_sources"]

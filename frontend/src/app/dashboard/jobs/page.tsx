@@ -4,6 +4,8 @@ import * as React from 'react';
 import { jobsService } from '../../../services/jobs';
 import { scraperService, ScraperTarget, ScrapedJob } from '../../../services/scraper';
 import { applicationsService } from '../../../services/applications';
+import { profileService, UserProfile } from '../../../services/profile';
+import { Country, State, City } from 'country-state-city';
 import {
   Box,
   Typography,
@@ -29,7 +31,9 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Tooltip
+  Tooltip,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddTaskIcon from '@mui/icons-material/AddTask';
@@ -38,6 +42,7 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import DeleteIcon from '@mui/icons-material/Delete';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import FolderSpecialIcon from '@mui/icons-material/FolderSpecial';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
 
 export default function BrowseJobsPage() {
   const [activeTab, setActiveTab] = React.useState(0);
@@ -56,6 +61,126 @@ export default function BrowseJobsPage() {
   const [extJobs, setExtJobs] = React.useState<ScrapedJob[]>([]);
   const [searchingExternal, setSearchingExternal] = React.useState(false);
 
+  // Preference filter states
+  const [profile, setProfile] = React.useState<UserProfile | null>(null);
+  const [filterByPreferences, setFilterByPreferences] = React.useState(false);
+
+  // Pre-calculate location keywords for faster lookup in filter
+  const preferenceKeywords = React.useMemo(() => {
+    if (!profile?.job_preferences) {
+      return { onsite: [], remote: [], hybrid: [] };
+    }
+
+    const getKeywordsForList = (locationsList: string[]): string[] => {
+      const allWords = new Set<string>();
+      
+      locationsList.forEach(loc => {
+        const parts = loc.split(',').map(p => p.trim());
+        if (parts.length === 0) return;
+        
+        // Add exact parts (e.g. "Lahore", "Punjab", "Pakistan")
+        parts.forEach(p => {
+          if (p) allWords.add(p.toLowerCase());
+        });
+        
+        const lastPart = parts[parts.length - 1];
+        const allCountries = Country.getAllCountries();
+        const country = allCountries.find(c => c.name.toLowerCase() === lastPart.toLowerCase());
+        
+        if (country) {
+          // It's a country! Add all states and cities in this country
+          const states = State.getStatesOfCountry(country.isoCode);
+          states?.forEach(s => {
+            allWords.add(s.name.toLowerCase());
+          });
+          const cities = City.getCitiesOfCountry(country.isoCode);
+          cities?.forEach(c => {
+            allWords.add(c.name.toLowerCase());
+          });
+        } else if (parts.length >= 2) {
+          // Check if it's a state under a country (e.g. "Punjab, Pakistan")
+          const stateName = parts[0];
+          const parentCountryName = parts[1];
+          const parentCountry = allCountries.find(c => c.name.toLowerCase() === parentCountryName.toLowerCase());
+          if (parentCountry) {
+            const states = State.getStatesOfCountry(parentCountry.isoCode);
+            const state = states?.find(s => s.name.toLowerCase() === stateName.toLowerCase());
+            if (state) {
+              const cities = City.getCitiesOfState(parentCountry.isoCode, state.isoCode);
+              cities?.forEach(c => {
+                allWords.add(c.name.toLowerCase());
+              });
+            }
+          }
+        }
+      });
+      
+      return Array.from(allWords);
+    };
+
+    return {
+      onsite: getKeywordsForList(profile.job_preferences.onsite || []),
+      remote: getKeywordsForList(profile.job_preferences.remote || []),
+      hybrid: getKeywordsForList(profile.job_preferences.hybrid || [])
+    };
+  }, [profile]);
+
+  // Helper to determine work mode of a job
+  const getJobWorkMode = React.useCallback((job: ScrapedJob): 'onsite' | 'remote' | 'hybrid' => {
+    const text = `${job.title} ${job.description_snippet || ''}`.toLowerCase();
+    
+    if (job.target_id === 'external') {
+      if (text.includes('hybrid')) return 'hybrid';
+      if (text.includes('onsite') || text.includes('on-site') || text.includes('in-office') || text.includes('in office')) return 'onsite';
+      return 'remote';
+    }
+    
+    if (text.includes('remote') || text.includes('wfh') || text.includes('work from home') || text.includes('telecommute')) {
+      return 'remote';
+    }
+    if (text.includes('hybrid') || text.includes('flexible')) {
+      return 'hybrid';
+    }
+    if (text.includes('onsite') || text.includes('on-site') || text.includes('in-office') || text.includes('in office') || text.includes('office based')) {
+      return 'onsite';
+    }
+    return 'onsite';
+  }, []);
+
+  // Helper to check if a job matches user preferences
+  const isJobMatchingPreferences = React.useCallback((job: ScrapedJob): boolean => {
+    if (!profile?.job_preferences) return true;
+    
+    const hasOnsitePrefs = (profile.job_preferences.onsite || []).length > 0;
+    const hasRemotePrefs = (profile.job_preferences.remote || []).length > 0;
+    const hasHybridPrefs = (profile.job_preferences.hybrid || []).length > 0;
+    
+    if (!hasOnsitePrefs && !hasRemotePrefs && !hasHybridPrefs) {
+      return true;
+    }
+    
+    const workMode = getJobWorkMode(job);
+    const keywords = preferenceKeywords[workMode];
+    
+    if (keywords.length === 0) {
+      return false;
+    }
+    
+    const text = `${job.title} ${job.description_snippet || ''}`.toLowerCase();
+    
+    if (workMode === 'remote') {
+      if (text.includes('worldwide') || text.includes('anywhere') || text.includes('global') || text.includes('work from anywhere')) {
+        return true;
+      }
+    }
+    
+    return keywords.some(keyword => {
+      const escaped = keyword.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+      return regex.test(text);
+    });
+  }, [profile, preferenceKeywords, getJobWorkMode]);
+
   // Dialog State
   const [openImportDialog, setOpenImportDialog] = React.useState(false);
   const [importingJob, setImportingJob] = React.useState<ScrapedJob | null>(null);
@@ -69,12 +194,14 @@ export default function BrowseJobsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [targetsData, jobsData] = await Promise.all([
+      const [targetsData, jobsData, profileData] = await Promise.all([
         scraperService.listTargets(),
-        jobsService.listJobs()
+        jobsService.listJobs(),
+        profileService.getProfile()
       ]);
       setTargets(targetsData);
       setJobs(jobsData);
+      setProfile(profileData);
     } catch (err: any) {
       setError('Failed to fetch job feed. Verify your API backend is running.');
     } finally {
@@ -159,27 +286,43 @@ export default function BrowseJobsPage() {
     }
   };
 
-  const getCompany = (job: ScrapedJob) => {
+  const getCompany = React.useCallback((job: ScrapedJob) => {
     if (job.target_id === 'external') {
       return job.description_snippet?.split(' | ')[0] || 'External Search Match';
     }
+    if (job.target_id.startsWith('general_')) {
+      const platform = job.target_id.split('_').slice(1).join(' ');
+      const platformName = platform.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const descPart = job.description_snippet?.split(' | ')[0];
+      return descPart && descPart !== platformName ? `${descPart} (${platformName})` : platformName;
+    }
     return targets.find(t => t.id === job.target_id)?.company_name || 'Scraper Target';
-  };
+  }, [targets]);
 
-  const filteredJobs = jobs.filter(job => {
-    const searchMatch = !dbSearch.trim() || 
-      job.title.toLowerCase().includes(dbSearch.toLowerCase()) || 
-      getCompany(job).toLowerCase().includes(dbSearch.toLowerCase()) || 
-      job.matched_keywords.some(k => k.toLowerCase().includes(dbSearch.toLowerCase()));
+  const preFilteredJobs = React.useMemo(() => {
+    return jobs.filter(job => {
+      const searchMatch = !dbSearch.trim() || 
+        job.title.toLowerCase().includes(dbSearch.toLowerCase()) || 
+        getCompany(job).toLowerCase().includes(dbSearch.toLowerCase()) || 
+        job.matched_keywords.some(k => k.toLowerCase().includes(dbSearch.toLowerCase()));
+        
+      const targetMatch = !targetFilter || job.target_id === targetFilter;
       
-    const targetMatch = !targetFilter || job.target_id === targetFilter;
-    
-    const unreadMatch = unreadFilter === 'all' || 
-      (unreadFilter === 'unread' && job.is_new) || 
-      (unreadFilter === 'read' && !job.is_new);
-      
-    return searchMatch && targetMatch && unreadMatch;
-  });
+      const unreadMatch = unreadFilter === 'all' || 
+        (unreadFilter === 'unread' && job.is_new) || 
+        (unreadFilter === 'read' && !job.is_new);
+        
+      return searchMatch && targetMatch && unreadMatch;
+    });
+  }, [jobs, dbSearch, targetFilter, unreadFilter, getCompany]);
+
+  const filteredJobs = React.useMemo(() => {
+    return preFilteredJobs.filter(job => !filterByPreferences || isJobMatchingPreferences(job));
+  }, [preFilteredJobs, filterByPreferences, isJobMatchingPreferences]);
+
+  const filteredExtJobs = React.useMemo(() => {
+    return extJobs.filter(job => !filterByPreferences || isJobMatchingPreferences(job));
+  }, [extJobs, filterByPreferences, isJobMatchingPreferences]);
 
   return (
     <Box>
@@ -210,52 +353,116 @@ export default function BrowseJobsPage() {
       {activeTab === 0 && (
         <Box>
           {/* Filters Bar */}
-          <Paper sx={{ p: 2, mb: 4, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <TextField
-              placeholder="Search title, company, tags..."
-              value={dbSearch}
-              onChange={(e) => setDbSearch(e.target.value)}
-              size="small"
-              sx={{ minWidth: 250 }}
-              slotProps={{
-                input: {
-                  startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1 }} />,
-                }
-              }}
-            />
+          <Paper sx={{ p: 2, mb: 4 }}>
+            <Stack spacing={2}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+                <TextField
+                  placeholder="Search title, company, tags..."
+                  value={dbSearch}
+                  onChange={(e) => setDbSearch(e.target.value)}
+                  size="small"
+                  sx={{ minWidth: 250, flexGrow: 1 }}
+                  slotProps={{
+                    input: {
+                      startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1 }} />,
+                    }
+                  }}
+                />
 
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="target-filter-label">Scraper Target</InputLabel>
-              <Select
-                labelId="target-filter-label"
-                label="Scraper Target"
-                value={targetFilter}
-                onChange={(e) => setTargetFilter(e.target.value)}
-              >
-                <MenuItem value="">All Targets</MenuItem>
-                <MenuItem value="external">External Search Results</MenuItem>
-                {targets.map(t => (
-                  <MenuItem key={t.id} value={t.id}>{t.company_name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="target-filter-label">Scraper Target</InputLabel>
+                  <Select
+                    labelId="target-filter-label"
+                    label="Scraper Target"
+                    value={targetFilter}
+                    onChange={(e) => setTargetFilter(e.target.value)}
+                  >
+                    <MenuItem value="">All Targets</MenuItem>
+                    <MenuItem value="external">External Search Results</MenuItem>
+                    {targets.map(t => (
+                      <MenuItem key={t.id} value={t.id}>{t.company_name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
 
-            <Tabs 
-              value={unreadFilter} 
-              onChange={(_, val) => setUnreadFilter(val)}
-              sx={{ ml: 'auto' }}
-            >
-              <Tab label="All" value="all" />
-              <Tab label="New/Unread" value="unread" />
-              <Tab label="Read" value="read" />
-            </Tabs>
+                <Tabs 
+                  value={unreadFilter} 
+                  onChange={(_, val) => setUnreadFilter(val)}
+                  sx={{ ml: 'auto' }}
+                >
+                  <Tab label="All" value="all" />
+                  <Tab label="New/Unread" value="unread" />
+                  <Tab label="Read" value="read" />
+                </Tabs>
+              </Box>
+
+              <Divider sx={{ borderStyle: 'dashed' }} />
+
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center', justifyContent: 'space-between' }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={filterByPreferences}
+                      onChange={(e) => setFilterByPreferences(e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Filter by Location Preferences
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                        Match jobs to your onsite/remote/hybrid settings
+                      </Typography>
+                    </Box>
+                  }
+                />
+
+                {/* Preference Chips Summary */}
+                {profile?.job_preferences && (
+                  <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                    {(profile.job_preferences.onsite || []).length > 0 && (
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: 'primary.main' }}>ONSITE:</Typography>
+                        {profile.job_preferences.onsite.map(loc => (
+                          <Chip key={loc} label={loc.split(',')[0]} size="small" variant="outlined" color="primary" sx={{ height: 20, fontSize: '0.7rem' }} />
+                        ))}
+                      </Stack>
+                    )}
+                    {(profile.job_preferences.remote || []).length > 0 && (
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: 'secondary.main' }}>REMOTE:</Typography>
+                        {profile.job_preferences.remote.map(loc => (
+                          <Chip key={loc} label={loc.split(',')[0]} size="small" variant="outlined" color="secondary" sx={{ height: 20, fontSize: '0.7rem' }} />
+                        ))}
+                      </Stack>
+                    )}
+                    {(profile.job_preferences.hybrid || []).length > 0 && (
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: '#f59e0b' }}>HYBRID:</Typography>
+                        {profile.job_preferences.hybrid.map(loc => (
+                          <Chip key={loc} label={loc.split(',')[0]} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem', color: '#f59e0b', borderColor: '#f59e0b' }} />
+                        ))}
+                      </Stack>
+                    )}
+                  </Stack>
+                )}
+              </Box>
+            </Stack>
           </Paper>
+
+          {filterByPreferences && filteredJobs.length < preFilteredJobs.length && (
+            <Alert severity="info" icon={<LocationOnIcon />} sx={{ mb: 3, fontWeight: 600 }}>
+              Showing {filteredJobs.length} of {preFilteredJobs.length} scraped positions matching your location preferences.
+            </Alert>
+          )}
 
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
           ) : filteredJobs.length === 0 ? (
             <Paper sx={{ p: 6, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
-              No matched jobs found in database. Adjust targets or search dynamically on the "Search External Jobs" tab.
+              No matched jobs found. Adjust targets or search dynamically on the "Search External Jobs" tab.
             </Paper>
           ) : (
             <Stack spacing={2}>
@@ -384,13 +591,20 @@ export default function BrowseJobsPage() {
                 </Typography>
               </Stack>
             </Card>
-          ) : extJobs.length === 0 ? (
+          ) : filteredExtJobs.length === 0 ? (
             <Paper sx={{ p: 6, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
-              No search results loaded. Input keywords above to scan and save matched listings.
+              {extJobs.length > 0 
+                ? 'No external jobs match your location preferences. Try disabling the preference filter.' 
+                : 'No search results loaded. Input keywords above to scan and save matched listings.'}
             </Paper>
           ) : (
             <Stack spacing={2}>
-              {extJobs.map((job) => (
+              {filterByPreferences && filteredExtJobs.length < extJobs.length && (
+                <Alert severity="info" icon={<LocationOnIcon />} sx={{ fontWeight: 600 }}>
+                  Showing {filteredExtJobs.length} of {extJobs.length} positions matching your location preferences.
+                </Alert>
+              )}
+              {filteredExtJobs.map((job) => (
                 <Paper 
                   key={job.id} 
                   sx={{ 
