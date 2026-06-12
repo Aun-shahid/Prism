@@ -5,6 +5,7 @@ from ..models.scraper import (
     ScraperTargetUpdateRequest,
     ScraperTargetResponse,
     ScrapedJobResponse,
+    PaginatedScrapedJobsResponse,
 )
 from ..models.general_sources import (
     GeneralScraperSourceCreateRequest,
@@ -72,14 +73,22 @@ async def trigger_scrape(
 
 # --- Discovered Jobs ---
 
-@router.get("/jobs", response_model=List[ScrapedJobResponse])
+@router.get("/jobs", response_model=PaginatedScrapedJobsResponse)
 async def get_discovered_jobs(
     target_id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Get all discovered jobs, optionally filtered by target."""
-    jobs = await ScraperService.get_discovered_jobs(current_user.id, target_id)
-    return jobs
+    """Get all discovered jobs, optionally filtered by target with pagination."""
+    user_id = None if current_user.role == "super_admin" else current_user.id
+    jobs_data = await ScraperService.get_discovered_jobs(
+        user_id=user_id,
+        target_id=target_id,
+        page=page,
+        limit=limit
+    )
+    return jobs_data
 
 
 @router.patch("/jobs/{job_id}/read", response_model=ScrapedJobResponse)

@@ -191,7 +191,7 @@ export default function SettingsPage() {
 
       <Grid container spacing={4}>
         {/* Left Column: Profile Settings */}
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: user?.role === 'super_admin' ? 12 : 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: 3 }}>
               <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 3 }}>
@@ -260,62 +260,64 @@ export default function SettingsPage() {
         </Grid>
 
         {/* Right Column: Encrypted API Keys */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <CardContent sx={{ p: 3, flexGrow: 1 }}>
-              <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                  <KeyIcon color="secondary" />
-                  <Typography variant="h6" sx={{ fontWeight: 700 }}>Encrypted LLM Keys</Typography>
+        {user?.role !== 'super_admin' && (
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <CardContent sx={{ p: 3, flexGrow: 1 }}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                    <KeyIcon color="secondary" />
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>Encrypted LLM Keys</Typography>
+                  </Stack>
+                  <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => setOpenKeyDialog(true)}>
+                    Configure Key
+                  </Button>
                 </Stack>
-                <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => setOpenKeyDialog(true)}>
-                  Configure Key
-                </Button>
-              </Stack>
-              <Divider sx={{ mb: 3 }} />
+                <Divider sx={{ mb: 3 }} />
 
-              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-                Keys are stored encrypted on the backend database. They are only decrypted in memory during resume tailoring.
-              </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                  Keys are stored encrypted on the backend database. They are only decrypted in memory during resume tailoring.
+                </Typography>
 
-              {loadingKeys ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
-              ) : keys.length === 0 ? (
-                <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
-                  No API keys configured yet. Tailoring tools require at least one provider key.
-                </Paper>
-              ) : (
-                <List>
-                  {keys.map((k) => (
-                    <Paper key={k.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Box>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-                            {k.provider.toUpperCase()}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {k.label || 'Default Key'}
-                          </Typography>
-                        </Box>
-                        
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Switch 
-                            checked={k.is_active} 
-                            onChange={() => handleToggleKey(k)}
-                            size="small"
-                          />
-                          <IconButton size="small" color="error" onClick={() => handleDeleteKey(k.id)}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                {loadingKeys ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
+                ) : keys.length === 0 ? (
+                  <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
+                    No API keys configured yet. Tailoring tools require at least one provider key.
+                  </Paper>
+                ) : (
+                  <List>
+                    {keys.map((k) => (
+                      <Paper key={k.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                              {k.provider.toUpperCase()}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              {k.label || 'Default Key'}
+                            </Typography>
+                          </Box>
+                          
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <Switch 
+                              checked={k.is_active} 
+                              onChange={() => handleToggleKey(k)}
+                              size="small"
+                            />
+                            <IconButton size="small" color="error" onClick={() => handleDeleteKey(k.id)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Stack>
                         </Stack>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </List>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
+                      </Paper>
+                    ))}
+                  </List>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Grid>
 
       {/* Configure Key Dialog */}

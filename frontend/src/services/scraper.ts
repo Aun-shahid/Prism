@@ -24,6 +24,14 @@ export interface ScrapedJob {
   discovered_at: string;
 }
 
+export interface PaginatedScrapedJobs {
+  jobs: ScrapedJob[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+
 export interface ScraperTargetCreatePayload {
   company_name: string;
   career_url: string;
@@ -87,10 +95,14 @@ export const scraperService = {
     return response.data;
   },
 
-  async listDiscoveredJobs(targetId?: string): Promise<ScrapedJob[]> {
-    const params: Record<string, string> = {};
+  async listDiscoveredJobs(
+    targetId?: string,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<PaginatedScrapedJobs> {
+    const params: Record<string, any> = { page, limit };
     if (targetId) params.target_id = targetId;
-    const response = await api.get<ScrapedJob[]>('/scraper/jobs', { params });
+    const response = await api.get<PaginatedScrapedJobs>('/scraper/jobs', { params });
     return response.data;
   },
 

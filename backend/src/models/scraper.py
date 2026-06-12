@@ -76,3 +76,11 @@ class ScrapedJobResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class PaginatedScrapedJobsResponse(BaseModel):
+    jobs: List[ScrapedJobResponse]
+    total: int
+    page: int
+    limit: int
+    pages: int

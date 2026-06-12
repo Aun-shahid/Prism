@@ -34,8 +34,11 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Autocomplete,
+  Pagination
 } from '@mui/material';
+import { Country, City } from 'country-state-city';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -78,7 +81,13 @@ export default function ScraperPage() {
     source_type: 'rss',
     locations: [] as string[]
   });
-  const [locationInput, setLocationInput] = React.useState('');
+  const [selectedCountry, setSelectedCountry] = React.useState<any | null>(null);
+  const [selectedCity, setSelectedCity] = React.useState<any | null>(null);
+
+  const citiesList = React.useMemo(() => {
+    if (!selectedCountry) return [];
+    return City.getCitiesOfCountry(selectedCountry.isoCode) || [];
+  }, [selectedCountry]);
 
   // Dialog for Edit General Source
   const [openEditGeneralDialog, setOpenEditGeneralDialog] = React.useState(false);
@@ -89,7 +98,13 @@ export default function ScraperPage() {
     source_type: '',
     locations: [] as string[]
   });
-  const [editLocationInput, setEditLocationInput] = React.useState('');
+  const [selectedEditCountry, setSelectedEditCountry] = React.useState<any | null>(null);
+  const [selectedEditCity, setSelectedEditCity] = React.useState<any | null>(null);
+
+  const editCitiesList = React.useMemo(() => {
+    if (!selectedEditCountry) return [];
+    return City.getCitiesOfCountry(selectedEditCountry.isoCode) || [];
+  }, [selectedEditCountry]);
 
   // Dialog for adding discovered job to application tracker
   const [openAppDialog, setOpenAppDialog] = React.useState(false);
@@ -100,24 +115,40 @@ export default function ScraperPage() {
     job_url: '',
     notes: ''
   });
+  const [platformFilter, setPlatformFilter] = React.useState('all');
+  const [page, setPage] = React.useState(1);
+  const [totalPages, setTotalPages] = React.useState(1);
+  const [totalJobs, setTotalJobs] = React.useState(0);
 
   const { user } = useAuth();
   const isAdmin = user?.role === 'super_admin';
 
+  const loadJobs = React.useCallback(async (pageNum: number, filter: string) => {
+    setLoadingJobs(true);
+    try {
+      const targetId = filter === 'all' ? undefined : filter;
+      const res = await scraperService.listDiscoveredJobs(targetId, pageNum, 10);
+      setJobs(res.jobs);
+      setTotalPages(res.pages);
+      setTotalJobs(res.total);
+    } catch (err) {
+      console.error('Failed to load scraper jobs', err);
+    } finally {
+      setLoadingJobs(false);
+    }
+  }, []);
+
   const loadData = React.useCallback(async () => {
     setLoadingTargets(true);
-    setLoadingJobs(true);
     setLoadingGeneral(true);
     try {
       const promises = [
         scraperService.listTargets(),
-        scraperService.listDiscoveredJobs(),
         isAdmin ? scraperService.listGeneralSources() : Promise.resolve([])
       ] as const;
 
-      const [targetsData, jobsData, generalData] = await Promise.all(promises);
+      const [targetsData, generalData] = await Promise.all(promises);
       setTargets(targetsData);
-      setJobs(jobsData);
       if (isAdmin) {
         setGeneralSources(generalData as GeneralScraperSource[]);
       }
@@ -125,7 +156,6 @@ export default function ScraperPage() {
       setError('Failed to fetch scraper information. Ensure backend is running.');
     } finally {
       setLoadingTargets(false);
-      setLoadingJobs(false);
       setLoadingGeneral(false);
     }
   }, [isAdmin]);
@@ -133,6 +163,10 @@ export default function ScraperPage() {
   React.useEffect(() => {
     loadData();
   }, [loadData]);
+
+  React.useEffect(() => {
+    loadJobs(page, platformFilter);
+  }, [page, platformFilter, loadJobs]);
 
   // --- Scraper Target CRUD ---
   const handleAddKeyword = () => {
@@ -188,8 +222,10 @@ export default function ScraperPage() {
       const scraped = await scraperService.triggerScrape(id);
       setSuccess(`Scrape complete! Found ${scraped.length} matching jobs.`);
       loadData();
+      loadJobs(1, platformFilter);
     } catch (err: any) {
       setError('Crawl completed but failed to scrape. Check target URL access restrictions.');
+      loadData();
     } finally {
       setScrapingId(null);
     }
@@ -207,9 +243,15 @@ export default function ScraperPage() {
 
   // --- General Sources CRUD ---
   const handleAddLocation = () => {
-    if (locationInput.trim() && !generalForm.locations.includes(locationInput.trim())) {
-      setGeneralForm(prev => ({ ...prev, locations: [...prev.locations, locationInput.trim()] }));
-      setLocationInput('');
+    if (selectedCountry) {
+      const locString = selectedCity
+        ? `${selectedCity.name}, ${selectedCountry.name}`
+        : selectedCountry.name;
+      if (!generalForm.locations.includes(locString)) {
+        setGeneralForm(prev => ({ ...prev, locations: [...prev.locations, locString] }));
+      }
+      setSelectedCountry(null);
+      setSelectedCity(null);
     }
   };
 
@@ -223,7 +265,8 @@ export default function ScraperPage() {
       await scraperService.addGeneralSource(generalForm);
       setOpenAddGeneralDialog(false);
       setGeneralForm({ name: '', url: '', source_type: 'rss', locations: [] });
-      setLocationInput('');
+      setSelectedCountry(null);
+      setSelectedCity(null);
       setSuccess('General scraper source added successfully.');
       loadData();
     } catch (err: any) {
@@ -239,14 +282,21 @@ export default function ScraperPage() {
       source_type: source.source_type,
       locations: source.locations || []
     });
-    setEditLocationInput('');
+    setSelectedEditCountry(null);
+    setSelectedEditCity(null);
     setOpenEditGeneralDialog(true);
   };
 
   const handleAddEditLocation = () => {
-    if (editLocationInput.trim() && !editGeneralForm.locations.includes(editLocationInput.trim())) {
-      setEditGeneralForm(prev => ({ ...prev, locations: [...prev.locations, editLocationInput.trim()] }));
-      setEditLocationInput('');
+    if (selectedEditCountry) {
+      const locString = selectedEditCity
+        ? `${selectedEditCity.name}, ${selectedEditCountry.name}`
+        : selectedEditCountry.name;
+      if (!editGeneralForm.locations.includes(locString)) {
+        setEditGeneralForm(prev => ({ ...prev, locations: [...prev.locations, locString] }));
+      }
+      setSelectedEditCountry(null);
+      setSelectedEditCity(null);
     }
   };
 
@@ -298,8 +348,10 @@ export default function ScraperPage() {
       const scraped = await scraperService.triggerGeneralScrape(id);
       setSuccess(`General crawl complete! Found ${scraped.length} matching jobs.`);
       loadData();
+      loadJobs(1, platformFilter);
     } catch (err: any) {
       setError('Crawl completed but failed to parse feed. Check source URL access restrictions.');
+      loadData();
     } finally {
       setScrapingGeneralId(null);
     }
@@ -348,6 +400,7 @@ export default function ScraperPage() {
       setSuccess('Application created! Added to Wishlist.');
       setOpenAppDialog(false);
       loadData();
+      loadJobs(page, platformFilter);
     } catch (err: any) {
       alert('Failed to track job application.');
     }
@@ -405,7 +458,20 @@ export default function ScraperPage() {
                       <Paper key={t.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <Box sx={{ maxWidth: '70%' }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{t.company_name}</Typography>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <Box 
+                                sx={{ 
+                                  width: 8, 
+                                  height: 8, 
+                                  borderRadius: '50%', 
+                                  bgcolor: t.is_active ? 'success.main' : 'error.main',
+                                  boxShadow: t.is_active 
+                                    ? '0 0 8px rgba(46, 125, 50, 0.6)' 
+                                    : '0 0 8px rgba(211, 47, 47, 0.6)'
+                                }} 
+                              />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{t.company_name}</Typography>
+                            </Stack>
                             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                               {t.career_url}
                             </Typography>
@@ -474,7 +540,20 @@ export default function ScraperPage() {
                       <Paper key={s.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <Box sx={{ maxWidth: '70%' }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{s.name}</Typography>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                              <Box 
+                                sx={{ 
+                                  width: 8, 
+                                  height: 8, 
+                                  borderRadius: '50%', 
+                                  bgcolor: s.is_active ? 'success.main' : 'error.main',
+                                  boxShadow: s.is_active 
+                                    ? '0 0 8px rgba(46, 125, 50, 0.6)' 
+                                    : '0 0 8px rgba(211, 47, 47, 0.6)'
+                                }} 
+                              />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{s.name}</Typography>
+                            </Stack>
                             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                               {s.url}
                             </Typography>
@@ -542,82 +621,124 @@ export default function ScraperPage() {
         <Grid size={{ xs: 12, md: 7 }}>
           <Card>
             <CardContent sx={{ p: 3 }}>
-              <Typography variant="h6" sx={{ fontWeight: 700, mb: 3 }}>Discovered Positions Feed</Typography>
+              <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>Discovered Positions Feed</Typography>
+                
+                <FormControl size="small" sx={{ minWidth: 180 }}>
+                  <InputLabel id="platform-filter-label">Source Filter</InputLabel>
+                  <Select
+                    labelId="platform-filter-label"
+                    label="Source Filter"
+                    value={platformFilter}
+                    onChange={(e) => {
+                      setPlatformFilter(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <MenuItem value="all">All Sources</MenuItem>
+                    <MenuItem value="general">All General Feeds</MenuItem>
+                    <MenuItem value="targets">All Company Targets</MenuItem>
+                    {generalSources.map(s => (
+                      <MenuItem key={s.id} value={`general_${s.name.toLowerCase().replace(/ /g, '_')}`}>{s.name}</MenuItem>
+                    ))}
+                    {targets.map(t => (
+                      <MenuItem key={t.id} value={t.id}>{t.company_name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
 
               {loadingJobs ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
               ) : jobs.length === 0 ? (
                 <Paper sx={{ p: 6, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.1)' }}>
                   <SearchIcon sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>No matched positions yet</Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    {totalJobs === 0 ? "No matched positions yet" : "No jobs match this filter"}
+                  </Typography>
                   <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                    Activate scraper targets and run manual scans, or await background cron sweeps.
+                    {totalJobs === 0 
+                      ? "Activate scraper targets and run manual scans, or await background cron sweeps."
+                      : "Try selecting a different filter option."}
                   </Typography>
                 </Paper>
               ) : (
-                <Stack spacing={2} sx={{ maxHeight: '70vh', overflowY: 'auto', pr: 1 }}>
-                  {jobs.map((job) => {
-                    const company = getJobCompany(job);
-                    return (
-                      <Paper 
-                        key={job.id} 
-                        sx={{ 
-                          p: 2.5, 
-                          bgcolor: job.is_new ? 'rgba(124, 58, 237, 0.02)' : 'transparent',
-                          border: job.is_new ? '1px solid rgba(124, 58, 237, 0.1)' : '1px solid rgba(255,255,255,0.04)'
-                        }}
-                      >
-                        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
-                          <Box sx={{ maxWidth: '80%' }}>
-                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-                              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{job.title}</Typography>
-                              {job.is_new && <Chip label="NEW" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800 }} />}
-                            </Stack>
-                            <Typography variant="subtitle2" color="secondary.main" sx={{ fontWeight: 600 }}>
-                              {company}
-                            </Typography>
-                          </Box>
-                          
-                          <Stack direction="row" spacing={0.5}>
-                            {job.url && (
-                              <IconButton size="small" href={job.url} target="_blank" rel="noopener noreferrer" color="primary">
-                                <LaunchIcon fontSize="small" />
-                              </IconButton>
-                            )}
-                            <Tooltip title="Add to applications pipeline">
-                              <IconButton size="small" color="success" onClick={() => handleOpenAppDialog(job)}>
-                                <AddTaskIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            {job.is_new && (
-                              <Tooltip title="Mark as read">
-                                <IconButton size="small" onClick={() => handleMarkRead(job.id)}>
-                                  <DoneIcon fontSize="small" />
+                <>
+                  <Stack spacing={2} sx={{ maxHeight: '70vh', overflowY: 'auto', pr: 1, mb: 2 }}>
+                    {jobs.map((job) => {
+                      const company = getJobCompany(job);
+                      return (
+                        <Paper 
+                          key={job.id} 
+                          sx={{ 
+                            p: 2.5, 
+                            bgcolor: job.is_new ? 'rgba(124, 58, 237, 0.02)' : 'transparent',
+                            border: job.is_new ? '1px solid rgba(124, 58, 237, 0.1)' : '1px solid rgba(255,255,255,0.04)'
+                          }}
+                        >
+                          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                            <Box sx={{ maxWidth: '80%' }}>
+                              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{job.title}</Typography>
+                                {job.is_new && <Chip label="NEW" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800 }} />}
+                              </Stack>
+                              <Typography variant="subtitle2" color="secondary.main" sx={{ fontWeight: 600 }}>
+                                {company}
+                              </Typography>
+                            </Box>
+                            
+                            <Stack direction="row" spacing={0.5}>
+                              {job.url && (
+                                <IconButton size="small" href={job.url} target="_blank" rel="noopener noreferrer" color="primary">
+                                  <LaunchIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                              <Tooltip title="Add to applications pipeline">
+                                <IconButton size="small" color="success" onClick={() => handleOpenAppDialog(job)}>
+                                  <AddTaskIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                            )}
+                              {job.is_new && (
+                                <Tooltip title="Mark as read">
+                                  <IconButton size="small" onClick={() => handleMarkRead(job.id)}>
+                                    <DoneIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                            </Stack>
                           </Stack>
-                        </Stack>
 
-                        {job.description_snippet && (
-                          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2, fontSize: '0.85rem', lineBreak: 'anywhere' }}>
-                            {job.description_snippet}
-                          </Typography>
-                        )}
+                          {job.description_snippet && (
+                            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2, fontSize: '0.85rem', lineBreak: 'anywhere' }}>
+                              {job.description_snippet}
+                            </Typography>
+                          )}
 
-                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>Matched Keywords:</Typography>
-                          {job.matched_keywords.map(kw => (
-                            <Chip key={kw} label={kw} size="small" sx={{ height: 18, fontSize: '0.65rem' }} />
-                          ))}
-                          <Typography variant="caption" sx={{ color: 'text.secondary', ml: 'auto' }}>
-                            Discovered on {new Date(job.discovered_at).toLocaleDateString()}
-                          </Typography>
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>Matched Keywords:</Typography>
+                            {job.matched_keywords.map(kw => (
+                              <Chip key={kw} label={kw} size="small" sx={{ height: 18, fontSize: '0.65rem' }} />
+                            ))}
+                            <Typography variant="caption" sx={{ color: 'text.secondary', ml: 'auto' }}>
+                              Discovered on {new Date(job.discovered_at).toLocaleDateString()}
+                            </Typography>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                  
+                  {totalPages > 1 && (
+                    <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+                      <Pagination 
+                        count={totalPages} 
+                        page={page} 
+                        onChange={(_, val) => setPage(val)} 
+                        color="primary" 
+                      />
+                    </Box>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -754,15 +875,27 @@ export default function ScraperPage() {
                <Box>
                  <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>Target Locations (e.g. United Kingdom, Pakistan)</Typography>
                  <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
-                   <TextField 
-                     label="Add Location" 
-                     size="small" 
-                     value={locationInput} 
-                     onChange={(e) => setLocationInput(e.target.value)} 
-                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddLocation())}
-                     fullWidth 
+                   <Autocomplete
+                     options={Country.getAllCountries()}
+                     getOptionLabel={(option) => option.name}
+                     value={selectedCountry}
+                     onChange={(_, newValue) => {
+                       setSelectedCountry(newValue);
+                       setSelectedCity(null);
+                     }}
+                     renderInput={(params) => <TextField {...params} label="Country" size="small" />}
+                     sx={{ flex: 1 }}
                    />
-                   <Button variant="outlined" onClick={handleAddLocation}>Add</Button>
+                   <Autocomplete
+                     options={citiesList}
+                     getOptionLabel={(option) => option.name}
+                     value={selectedCity}
+                     onChange={(_, newValue) => setSelectedCity(newValue)}
+                     disabled={!selectedCountry}
+                     renderInput={(params) => <TextField {...params} label="City (Optional)" size="small" />}
+                     sx={{ flex: 1 }}
+                   />
+                   <Button variant="outlined" onClick={handleAddLocation} disabled={!selectedCountry}>Add</Button>
                  </Stack>
                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                    {generalForm.locations.map((loc, i) => (
@@ -807,15 +940,27 @@ export default function ScraperPage() {
                <Box>
                  <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>Target Locations (e.g. United Kingdom, Pakistan)</Typography>
                  <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
-                   <TextField 
-                     label="Add Location" 
-                     size="small" 
-                     value={editLocationInput} 
-                     onChange={(e) => setEditLocationInput(e.target.value)} 
-                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEditLocation())}
-                     fullWidth 
+                   <Autocomplete
+                     options={Country.getAllCountries()}
+                     getOptionLabel={(option) => option.name}
+                     value={selectedEditCountry}
+                     onChange={(_, newValue) => {
+                       setSelectedEditCountry(newValue);
+                       setSelectedEditCity(null);
+                     }}
+                     renderInput={(params) => <TextField {...params} label="Country" size="small" />}
+                     sx={{ flex: 1 }}
                    />
-                   <Button variant="outlined" onClick={handleAddEditLocation}>Add</Button>
+                   <Autocomplete
+                     options={editCitiesList}
+                     getOptionLabel={(option) => option.name}
+                     value={selectedEditCity}
+                     onChange={(_, newValue) => setSelectedEditCity(newValue)}
+                     disabled={!selectedEditCountry}
+                     renderInput={(params) => <TextField {...params} label="City (Optional)" size="small" />}
+                     sx={{ flex: 1 }}
+                   />
+                   <Button variant="outlined" onClick={handleAddEditLocation} disabled={!selectedEditCountry}>Add</Button>
                  </Stack>
                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                    {editGeneralForm.locations.map((loc, i) => (

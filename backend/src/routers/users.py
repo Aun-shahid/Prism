@@ -4,7 +4,34 @@ from ..models.users import User, UserResponse, UserUpdateRequest, UserType
 from ..services.user_service import UserService
 from ..auth.dependencies import get_current_active_user, require_super_admin
 
+from ..database import (
+    get_users_collection,
+    get_scraper_targets_collection,
+    get_scraped_jobs_collection,
+    get_general_sources_collection,
+)
+
 router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/admin/stats")
+async def get_admin_stats(admin_user: User = Depends(require_super_admin)):
+    """Retrieve overview statistics of the system (Admin only)."""
+    users_col = get_users_collection()
+    targets_col = get_scraper_targets_collection()
+    jobs_col = get_scraped_jobs_collection()
+    sources_col = get_general_sources_collection()
+    
+    total_users = await users_col.count_documents({})
+    total_targets = await targets_col.count_documents({})
+    total_jobs = await jobs_col.count_documents({})
+    total_sources = await sources_col.count_documents({})
+    
+    return {
+        "total_users": total_users,
+        "total_targets": total_targets,
+        "total_jobs": total_jobs,
+        "total_sources": total_sources
+    }
 
 @router.get("/me", response_model=UserResponse)
 async def get_my_details(current_user: User = Depends(get_current_active_user)):

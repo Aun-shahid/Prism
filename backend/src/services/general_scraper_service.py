@@ -43,9 +43,27 @@ class GeneralScraperService:
                 try:
                     res = await client.get(url, headers=HEADERS)
                     if res.status_code != 200:
-                        logger.warning(f"LinkedIn guest search for '{query}' returned status {res.status_code}")
+                        logger.warning(f"LinkedIn guest search for '{query}' returned status {res.status_code}. Deactivating source.")
+                        try:
+                            sources_col = get_general_sources_collection()
+                            await sources_col.update_many(
+                                {"source_type": "preset_linkedin"},
+                                {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+                            )
+                        except Exception as db_err:
+                            logger.error(f"Failed to deactivate LinkedIn source in DB: {db_err}")
                         continue
                     
+                    # Ensure active in DB
+                    try:
+                        sources_col = get_general_sources_collection()
+                        await sources_col.update_many(
+                            {"source_type": "preset_linkedin"},
+                            {"$set": {"is_active": True, "updated_at": datetime.utcnow()}}
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to activate LinkedIn source in DB: {db_err}")
+
                     soup = BeautifulSoup(res.text, "html.parser")
                     cards = soup.select("li")
                     for card in cards:
@@ -66,7 +84,15 @@ class GeneralScraperService:
                                 "description_snippet": f"{company} | Location: {location}",
                             })
                 except Exception as e:
-                    logger.error(f"Failed to crawl LinkedIn guest jobs for '{query}': {e}")
+                    logger.error(f"Failed to crawl LinkedIn guest jobs for '{query}': {e}. Deactivating source.")
+                    try:
+                        sources_col = get_general_sources_collection()
+                        await sources_col.update_many(
+                            {"source_type": "preset_linkedin"},
+                            {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to deactivate LinkedIn source in DB: {db_err}")
         return jobs
 
     @staticmethod
@@ -89,42 +115,71 @@ class GeneralScraperService:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.get(url, headers=HEADERS)
-                if res.status_code == 200:
-                    data = res.json().get("data", [])
-                    keyword_lower = keyword.lower()
-                    for item in data:
-                        title = item.get("title", "")
-                        company = item.get("company_name", "")
-                        location = item.get("location", "")
-                        url_link = item.get("url", "")
-                        tags = [t.lower() for t in item.get("tags", [])]
-                        
-                        # Match keyword in title, company or tags
-                        keyword_match = (keyword_lower in title.lower() or 
-                                         keyword_lower in company.lower() or 
-                                         any(keyword_lower in t for t in tags))
-                        if not keyword_match:
-                            continue
+                if res.status_code != 200:
+                    logger.warning(f"Failed to fetch Arbeitnow JSON API: HTTP status {res.status_code}. Deactivating source.")
+                    try:
+                        sources_col = get_general_sources_collection()
+                        await sources_col.update_many(
+                            {"source_type": "preset_arbeitnow"},
+                            {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to deactivate Arbeitnow source in DB: {db_err}")
+                    return []
 
-                        # Check location constraint
-                        location_match = True
-                        if locations:
-                            text_to_check = f"{title} {location} {company}".lower()
-                            location_match = (
-                                "remote" in text_to_check or 
-                                "worldwide" in text_to_check or 
-                                "anywhere" in text_to_check or 
-                                any(re.search(r'\b' + re.escape(loc.lower()) + r'\b', text_to_check) for loc in locations)
-                            )
-                        
-                        if location_match:
-                            jobs.append({
-                                "title": title,
-                                "url": url_link,
-                                "description_snippet": f"{company} | Location: {location}",
-                            })
+                # Ensure active in DB
+                try:
+                    sources_col = get_general_sources_collection()
+                    await sources_col.update_many(
+                        {"source_type": "preset_arbeitnow"},
+                        {"$set": {"is_active": True, "updated_at": datetime.utcnow()}}
+                    )
+                except Exception as db_err:
+                    logger.error(f"Failed to activate Arbeitnow source in DB: {db_err}")
+
+                data = res.json().get("data", [])
+                keyword_lower = keyword.lower()
+                for item in data:
+                    title = item.get("title", "")
+                    company = item.get("company_name", "")
+                    location = item.get("location", "")
+                    url_link = item.get("url", "")
+                    tags = [t.lower() for t in item.get("tags", [])]
+                    
+                    # Match keyword in title, company or tags
+                    keyword_match = (keyword_lower in title.lower() or 
+                                     keyword_lower in company.lower() or 
+                                     any(keyword_lower in t for t in tags))
+                    if not keyword_match:
+                        continue
+
+                    # Check location constraint
+                    location_match = True
+                    if locations:
+                        text_to_check = f"{title} {location} {company}".lower()
+                        location_match = (
+                            "remote" in text_to_check or 
+                            "worldwide" in text_to_check or 
+                            "anywhere" in text_to_check or 
+                            any(re.search(r'\b' + re.escape(loc.lower()) + r'\b', text_to_check) for loc in locations)
+                        )
+                    
+                    if location_match:
+                        jobs.append({
+                            "title": title,
+                            "url": url_link,
+                            "description_snippet": f"{company} | Location: {location}",
+                        })
         except Exception as e:
-            logger.error(f"Failed to fetch Arbeitnow JSON API: {e}")
+            logger.error(f"Failed to fetch Arbeitnow JSON API: {e}. Deactivating source.")
+            try:
+                sources_col = get_general_sources_collection()
+                await sources_col.update_many(
+                    {"source_type": "preset_arbeitnow"},
+                    {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+                )
+            except Exception as db_err:
+                logger.error(f"Failed to deactivate Arbeitnow source in DB: {db_err}")
         return jobs
 
     @staticmethod
@@ -135,10 +190,24 @@ class GeneralScraperService:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 res = await client.get(url, headers=HEADERS)
                 if res.status_code != 200:
+                    logger.warning(f"Failed to fetch RSS feed {url}: HTTP status {res.status_code}. Deactivating source.")
+                    try:
+                        sources_col = get_general_sources_collection()
+                        await sources_col.update_many({"url": url}, {"$set": {"is_active": False, "updated_at": datetime.utcnow()}})
+                    except Exception as db_err:
+                        logger.error(f"Failed to deactivate source on HTTP error in DB: {db_err}")
                     return []
                 
                 # Parse XML tree
                 root = ET.fromstring(res.content)
+
+                # Successfully parsed, let's ensure it's marked active in DB
+                try:
+                    sources_col = get_general_sources_collection()
+                    await sources_col.update_many({"url": url}, {"$set": {"is_active": True, "updated_at": datetime.utcnow()}})
+                except Exception as db_err:
+                    logger.error(f"Failed to activate source in DB: {db_err}")
+
                 keyword_lower = keyword.lower()
                 for item in root.findall(".//item"):
                     title_elem = item.find("title")
@@ -175,7 +244,12 @@ class GeneralScraperService:
                             "description_snippet": snippet[:250],
                         })
         except Exception as e:
-            logger.error(f"Failed to parse RSS feed from {url}: {e}")
+            logger.error(f"Failed to parse RSS feed from {url}: {e}. Deactivating source.")
+            try:
+                sources_col = get_general_sources_collection()
+                await sources_col.update_many({"url": url}, {"$set": {"is_active": False, "updated_at": datetime.utcnow()}})
+            except Exception as db_err:
+                logger.error(f"Failed to deactivate source on parsing error in DB: {db_err}")
         return jobs
 
     @staticmethod
@@ -194,6 +268,7 @@ class GeneralScraperService:
         if not source_doc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scraper source not found")
 
+        source_doc["_id"] = str(source_doc["_id"])
         source = GeneralScraperSource(**source_doc)
         
         # Get user's search queries (job titles)

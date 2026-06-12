@@ -48,4 +48,9 @@ export const usersService = {
   async deleteUser(userId: string): Promise<void> {
     await api.delete(`/users/${userId}`);
   },
+
+  async getAdminStats(): Promise<{ total_users: number; total_targets: number; total_jobs: number; total_sources: number }> {
+    const response = await api.get('/users/admin/stats');
+    return response.data;
+  },
 };

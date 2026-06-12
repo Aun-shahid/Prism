@@ -27,6 +27,13 @@ from .logging_service import get_logger
 
 logger = get_logger("scraper_service")
 
+# Browser headers to avoid scraper blocks
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
 # Common job-listing HTML tag patterns
 JOB_LINK_PATTERNS = [
     "a[href*='job']",
@@ -243,20 +250,42 @@ class ScraperService:
 
     @staticmethod
     async def get_discovered_jobs(
-        user_id: str, target_id: Optional[str] = None
-    ) -> List[ScrapedJob]:
-        """Get all discovered jobs, optionally filtered by target."""
+        user_id: Optional[str] = None,
+        target_id: Optional[str] = None,
+        page: int = 1,
+        limit: int = 10
+    ) -> dict:
+        """Get all discovered jobs, optionally filtered by target with pagination."""
         collection = get_scraped_jobs_collection()
-        query = {"user_id": user_id}
-        if target_id:
-            query["target_id"] = target_id
+        query = {}
+        if user_id:
+            query["user_id"] = user_id
 
-        cursor = collection.find(query).sort("discovered_at", -1)
+        if target_id:
+            if target_id == "general":
+                query["target_id"] = {"$regex": "^general_"}
+            elif target_id == "targets":
+                query["target_id"] = {"$not": {"$regex": "^general_"}, "$ne": "external"}
+            else:
+                query["target_id"] = target_id
+
+        total = await collection.count_documents(query)
+        cursor = collection.find(query).sort("discovered_at", -1).skip((page - 1) * limit).limit(limit)
         jobs = []
         async for doc in cursor:
             doc["_id"] = str(doc["_id"])
             jobs.append(ScrapedJob(**doc))
-        return jobs
+
+        import math
+        pages = math.ceil(total / limit) if limit > 0 else 1
+
+        return {
+            "jobs": jobs,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages
+        }
 
     @staticmethod
     async def mark_job_read(user_id: str, job_id: str) -> ScrapedJob:
@@ -294,11 +323,36 @@ class ScraperService:
         """Register a new general scraper source."""
         collection = get_general_sources_collection()
         now = datetime.utcnow()
+
+        # Try validating RSS feed immediately upon creation
+        is_active = False
+        if data.source_type == "rss":
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    res = await client.get(data.url, headers=HEADERS)
+                    if res.status_code == 200:
+                        import xml.etree.ElementTree as ET
+                        root = ET.fromstring(res.content)
+                        items = root.findall(".//item")
+                        if len(items) > 0:
+                            is_active = True
+                            logger.info(f"Verified RSS feed '{data.name}' works and contains {len(items)} items.")
+                        else:
+                            logger.warning(f"Verified RSS feed '{data.name}' has 0 items.")
+                    else:
+                        logger.warning(f"Failed to fetch RSS feed '{data.name}': HTTP status {res.status_code}")
+            except Exception as e:
+                logger.error(f"Error validating RSS feed URL '{data.url}': {e}")
+        else:
+            # Presets (LinkedIn, Arbeitnow) default to active
+            is_active = True
+
         doc = {
             "name": data.name,
             "url": data.url,
             "source_type": data.source_type,
-            "is_active": True,
+            "locations": data.locations,
+            "is_active": is_active,
             "created_at": now,
             "updated_at": now,
         }
@@ -318,7 +372,37 @@ class ScraperService:
         except Exception:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid source ID")
 
+        existing_doc = await collection.find_one({"_id": oid})
+        if not existing_doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
         update_dict = data.model_dump(exclude_unset=True)
+
+        new_url = update_dict.get("url")
+        source_type = existing_doc.get("source_type", "rss")
+
+        # If updating URL for an RSS source, validate it immediately
+        if new_url and source_type == "rss":
+            is_active = False
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    res = await client.get(new_url, headers=HEADERS)
+                    if res.status_code == 200:
+                        import xml.etree.ElementTree as ET
+                        root = ET.fromstring(res.content)
+                        items = root.findall(".//item")
+                        if len(items) > 0:
+                            is_active = True
+                            logger.info(f"Verified updated RSS feed URL works and contains {len(items)} items.")
+                        else:
+                            logger.warning("Updated RSS feed has 0 items.")
+                    else:
+                        logger.warning(f"Failed to fetch updated RSS feed: HTTP status {res.status_code}")
+            except Exception as e:
+                logger.error(f"Error validating updated RSS feed URL '{new_url}': {e}")
+            
+            update_dict["is_active"] = is_active
+
         update_dict["updated_at"] = datetime.utcnow()
 
         result = await collection.update_one(

@@ -81,7 +81,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const menuItems = [
+  const menuItems = user.role === 'super_admin' ? [
+    { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
+    { text: 'Job Scraper', icon: <LanguageIcon />, path: '/dashboard/scraper' },
+    { text: 'Manage Users', icon: <PeopleIcon />, path: '/dashboard?tab=users' },
+    { text: 'Settings', icon: <SettingsIcon />, path: '/dashboard/settings' },
+  ] : [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
     { text: 'Applications', icon: <WorkIcon />, path: '/dashboard/applications' },
     { text: 'My Profile', icon: <PersonIcon />, path: '/dashboard/profile' },
@@ -91,11 +96,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { text: 'Gmail Outreach', icon: <EmailIcon />, path: '/dashboard/gmail' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/dashboard/settings' },
   ];
-
-  // If super_admin, show admin users manager
-  if (user.role === 'super_admin') {
-    menuItems.push({ text: 'Manage Users', icon: <PeopleIcon />, path: '/dashboard?tab=users' });
-  }
 
   const drawerContent = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>

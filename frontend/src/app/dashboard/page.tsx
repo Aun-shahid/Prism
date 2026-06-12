@@ -38,6 +38,9 @@ import InfoIcon from '@mui/icons-material/Info';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import SpeedIcon from '@mui/icons-material/Speed';
+import PeopleIcon from '@mui/icons-material/People';
+import LanguageIcon from '@mui/icons-material/Language';
+import SearchIcon from '@mui/icons-material/Search';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -56,26 +59,46 @@ export default function DashboardPage() {
   const [loadingUsers, setLoadingUsers] = React.useState(false);
   const [adminError, setAdminError] = React.useState<string | null>(null);
 
+  const [adminStats, setAdminStats] = React.useState({
+    total_users: 0,
+    total_targets: 0,
+    total_jobs: 0,
+    total_sources: 0
+  });
+
   const fetchDashboardData = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [statsData, appsData] = await Promise.all([
-        applicationsService.getStats(),
-        applicationsService.listApplications()
-      ]);
-      setStats(statsData);
-      // Sort by created_at desc and take top 5
-      const sorted = [...appsData].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-      setRecentApps(sorted.slice(0, 5));
+      if (user?.role === 'super_admin') {
+        const [statsData, appsData, adminStatsData] = await Promise.all([
+          applicationsService.getStats(),
+          applicationsService.listApplications(),
+          usersService.getAdminStats()
+        ]);
+        setStats(statsData);
+        setAdminStats(adminStatsData);
+        const sorted = [...appsData].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setRecentApps(sorted.slice(0, 5));
+      } else {
+        const [statsData, appsData] = await Promise.all([
+          applicationsService.getStats(),
+          applicationsService.listApplications()
+        ]);
+        setStats(statsData);
+        const sorted = [...appsData].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setRecentApps(sorted.slice(0, 5));
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load dashboard data. Ensure backend is running.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   const fetchUsers = React.useCallback(async () => {
     if (user?.role !== 'super_admin') return;
@@ -241,6 +264,125 @@ export default function DashboardPage() {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (user?.role === 'super_admin' && currentTab === 'overview') {
+    return (
+      <Box>
+        <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Box>
+            <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
+              System Admin Overview
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              Welcome back, Administrator. Platform-wide configuration, scraper feeds, and user status monitoring.
+            </Typography>
+          </Box>
+          <Button 
+            variant="contained" 
+            startIcon={<PeopleIcon />} 
+            onClick={() => router.push('/dashboard?tab=users')}
+            sx={{ 
+              background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)',
+              boxShadow: '0 4px 12px rgba(236,72,153,0.3)'
+            }}
+          >
+            Manage Users
+          </Button>
+        </Stack>
+
+        {error && <Alert severity="warning" sx={{ mb: 4 }}>{error}</Alert>}
+
+        {/* Admin Stats Grid */}
+        <Grid container spacing={3} sx={{ mb: 5 }}>
+          {[
+            { label: 'Registered Users', count: adminStats.total_users, color: '#ec4899', icon: <PeopleIcon />, path: '/dashboard?tab=users' },
+            { label: 'Scraped Jobs (Total)', count: adminStats.total_jobs, color: '#3b82f6', icon: <SearchIcon />, path: '/dashboard/scraper' },
+            { label: 'General Crawler Feeds', count: adminStats.total_sources, color: '#f59e0b', icon: <LanguageIcon />, path: '/dashboard/scraper' },
+            { label: 'Career Targets', count: adminStats.total_targets, color: '#10b981', icon: <WorkIcon />, path: '/dashboard/scraper' }
+          ].map((card) => (
+            <Grid size={{ xs: 12, sm: 6, md: 3 }} key={card.label}>
+              <Card 
+                sx={{ 
+                  borderLeft: `4px solid ${card.color}`, 
+                  bgcolor: 'rgba(255, 255, 255, 0.01)',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' }
+                }}
+                onClick={() => router.push(card.path)}
+              >
+                <CardContent sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 3 }}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                      {card.label}
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, mt: 1 }}>
+                      {card.count}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.04)', color: card.color }}>
+                    {card.icon}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+
+        <Grid container spacing={3} sx={{ mb: 5 }}>
+          {/* Scraper controls and diagnostic card */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Card sx={{ height: '100%' }}>
+              <CardContent sx={{ p: 3 }}>
+                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 3 }}>
+                  <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                    <SpeedIcon />
+                  </Box>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    Platform Administration
+                  </Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                  As an administrator, you configure the target locations and sources used by the global background scheduler. This avoids overloading search endpoints (e.g. LinkedIn API) and prevents database bloating.
+                </Typography>
+                
+                <Stack spacing={2}>
+                  <Button 
+                    variant="outlined" 
+                    fullWidth 
+                    onClick={() => router.push('/dashboard/scraper')}
+                  >
+                    Configure Target Locations & RSS
+                  </Button>
+                  <Button 
+                    variant="outlined" 
+                    fullWidth 
+                    onClick={() => router.push('/dashboard?tab=users')}
+                  >
+                    Promote Users or Toggle Roles
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* System Info card */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Card sx={{ height: '100%', background: 'linear-gradient(145deg, rgba(17, 24, 39, 0.8) 0%, rgba(9, 13, 22, 0.9) 100%)' }}>
+              <CardContent sx={{ p: 4 }}>
+                <Typography variant="h5" sx={{ fontWeight: 800, mb: 1, color: '#ec4899' }}>
+                  Super Admin Console Active
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                  You have full write access to general search configurations, platform user roles, and database controls. Ensure that crawler presets remain configured with location filters (e.g., United Kingdom) to protect background worker resources.
+                </Typography>
+                <Chip label="Admin mode: Enabled" color="secondary" sx={{ fontWeight: 700 }} />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </Box>
     );
   }
