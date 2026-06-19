@@ -23,7 +23,11 @@ import {
   MenuItem,
   Avatar,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Badge,
+  Popover,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -37,6 +41,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import EmailIcon from '@mui/icons-material/Email';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LanguageIcon from '@mui/icons-material/Language';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import { notificationsService, Notification } from '../../services/notifications';
 
 const drawerWidth = 240;
 
@@ -48,6 +54,89 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+
+  // Notifications state
+  const [notifications, setNotifications] = React.useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [notifAnchorEl, setNotifAnchorEl] = React.useState<null | HTMLElement>(null);
+  
+  // Real-time toast alert
+  const [toastOpen, setToastOpen] = React.useState(false);
+  const [latestNotification, setLatestNotification] = React.useState<Notification | null>(null);
+
+  const fetchNotifications = React.useCallback(async () => {
+    try {
+      const data = await notificationsService.listNotifications(15);
+      setNotifications(data);
+      setUnreadCount(data.filter(n => !n.is_read).length);
+    } catch (err) {
+      console.error('Failed to fetch notifications', err);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (user) {
+      fetchNotifications();
+
+      // Start SSE stream
+      const unsubscribe = notificationsService.streamNotifications(
+        (newNotif) => {
+          setLatestNotification(newNotif);
+          setToastOpen(true);
+          setNotifications(prev => [newNotif, ...prev.slice(0, 14)]);
+          setUnreadCount(prev => prev + 1);
+        },
+        (err) => {
+          console.error('SSE Notification stream error', err);
+        }
+      );
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [user, fetchNotifications]);
+
+  const handleNotifOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setNotifAnchorEl(event.currentTarget);
+  };
+
+  const handleNotifClose = () => {
+    setNotifAnchorEl(null);
+  };
+
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      await notificationsService.markRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error('Failed to mark notification read', err);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await notificationsService.markAllRead();
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+      handleNotifClose();
+    } catch (err) {
+      console.error('Failed to mark all notifications read', err);
+    }
+  };
+
+  const formatTimeAgo = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
 
   React.useEffect(() => {
     // Redirect if not logged in
@@ -83,15 +172,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const menuItems = user.role === 'super_admin' ? [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-    { text: 'Job Scraper', icon: <LanguageIcon />, path: '/dashboard/scraper' },
+    { text: 'Career Watchlist', icon: <LanguageIcon />, path: '/dashboard/watchlist' },
     { text: 'Manage Users', icon: <PeopleIcon />, path: '/dashboard?tab=users' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/dashboard/settings' },
   ] : [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
     { text: 'Applications', icon: <WorkIcon />, path: '/dashboard/applications' },
     { text: 'My Profile', icon: <PersonIcon />, path: '/dashboard/profile' },
-    { text: 'Tailor Resume', icon: <DescriptionIcon />, path: '/dashboard/resume' },
-    { text: 'Job Scraper', icon: <LanguageIcon />, path: '/dashboard/scraper' },
+    { text: 'Resume Builder', icon: <DescriptionIcon />, path: '/dashboard/resume' },
+    { text: 'Career Watchlist', icon: <LanguageIcon />, path: '/dashboard/watchlist' },
     { text: 'Browse Jobs', icon: <SearchIcon />, path: '/dashboard/jobs' },
     { text: 'Gmail Outreach', icon: <EmailIcon />, path: '/dashboard/gmail' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/dashboard/settings' },
@@ -182,6 +271,86 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Typography>
 
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            {/* Notification Bell */}
+            <IconButton color="inherit" onClick={handleNotifOpen}>
+              <Badge badgeContent={unreadCount} color="error">
+                <NotificationsIcon />
+              </Badge>
+            </IconButton>
+
+            <Popover
+              anchorEl={notifAnchorEl}
+              open={Boolean(notifAnchorEl)}
+              onClose={handleNotifClose}
+              anchorOrigin={{
+                vertical: 'bottom',
+                horizontal: 'right',
+              }}
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              slotProps={{
+                paper: {
+                  sx: {
+                    width: 320,
+                    maxHeight: 400,
+                    bgcolor: '#090d16',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                  }
+                }
+              }}
+            >
+              <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Notifications</Typography>
+                {unreadCount > 0 && (
+                  <Button size="small" variant="text" onClick={handleMarkAllAsRead} sx={{ fontSize: '0.75rem', p: 0 }}>
+                    Mark all read
+                  </Button>
+                )}
+              </Box>
+              <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />
+              <List sx={{ p: 0, maxHeight: 300, overflowY: 'auto' }}>
+                {notifications.length === 0 ? (
+                  <Box sx={{ p: 4, textAlign: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">No notifications yet</Typography>
+                  </Box>
+                ) : (
+                  notifications.map((notif) => (
+                    <ListItem 
+                      key={notif.id} 
+                      disablePadding 
+                      sx={{ 
+                        bgcolor: notif.is_read ? 'transparent' : 'rgba(124, 58, 237, 0.05)',
+                        borderBottom: '1px solid rgba(255,255,255,0.04)',
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' }
+                      }}
+                      onClick={() => handleMarkAsRead(notif.id)}
+                    >
+                      <ListItemButton sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 2 }}>
+                        <Stack direction="row" spacing={1} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: notif.is_read ? 600 : 800, color: notif.is_read ? 'text.primary' : '#a78bfa' }}>
+                            {notif.title}
+                          </Typography>
+                          {!notif.is_read && (
+                            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#7c3aed' }} />
+                          )}
+                        </Stack>
+                        <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem', mb: 1, lineBreak: 'anywhere' }}>
+                          {notif.message}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                          {formatTimeAgo(notif.created_at)}
+                        </Typography>
+                      </ListItemButton>
+                    </ListItem>
+                  ))
+                )}
+              </List>
+            </Popover>
+
             <Typography variant="body2" sx={{ display: { xs: 'none', sm: 'block' }, color: 'text.secondary' }}>
               Welcome, <strong>{user.name}</strong>
             </Typography>
@@ -258,6 +427,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         {children}
       </Box>
+
+      {/* Real-time Toast Alert */}
+      <Snackbar
+        open={toastOpen}
+        autoHideDuration={6000}
+        onClose={() => setToastOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        {latestNotification ? (
+          <Alert 
+            onClose={() => setToastOpen(false)} 
+            severity="info" 
+            sx={{ 
+              width: '100%', 
+              bgcolor: '#090d16', 
+              color: '#fff', 
+              border: '1px solid #7c3aed',
+              boxShadow: '0 4px 20px rgba(124,58,237,0.3)',
+              '& .MuiAlert-icon': { color: '#a78bfa' }
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{latestNotification.title}</Typography>
+            <Typography variant="body2" sx={{ fontSize: '0.8rem', mt: 0.5 }}>{latestNotification.message}</Typography>
+          </Alert>
+        ) : undefined}
+      </Snackbar>
     </Box>
   );
 }

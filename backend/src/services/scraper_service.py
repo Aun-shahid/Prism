@@ -245,6 +245,27 @@ class ScraperService:
             {"$set": {"last_scraped": now, "updated_at": now}}
         )
 
+        if discovered_jobs:
+            try:
+                from .notification_service import NotificationService
+                job_count = len(discovered_jobs)
+                company = target.company_name
+                if job_count == 1:
+                    title_text = f"New Job at {company}"
+                    message_text = f"We found 1 new role matching your preferences: {discovered_jobs[0].title}"
+                else:
+                    title_text = f"{job_count} New Jobs at {company}"
+                    message_text = f"We found {job_count} new roles matching your preferences."
+                
+                await NotificationService.create_notification(
+                    user_id=user_id,
+                    title=title_text,
+                    message=message_text,
+                    type="job_alert"
+                )
+            except Exception as e:
+                logger.error(f"Failed to create notification for scraped jobs: {e}")
+
         logger.info(f"Scraped {target.company_name}: found {len(discovered_jobs)} new jobs")
         return discovered_jobs
 

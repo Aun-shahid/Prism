@@ -11,6 +11,7 @@ from ..database import (
     get_scraped_jobs_collection,
     get_profiles_collection,
     get_general_sources_collection,
+    get_blacklisted_jobs_collection,
 )
 from ..models.scraper import ScrapedJob
 from ..models.general_sources import GeneralScraperSource
@@ -29,15 +30,42 @@ HEADERS = {
 class GeneralScraperService:
 
     @staticmethod
+    async def _get_applicant_count(job_url: str, client: httpx.AsyncClient) -> Optional[int]:
+        """Fetch LinkedIn job detail page and extract applicant count."""
+        try:
+            res = await client.get(job_url, headers=HEADERS, follow_redirects=True, timeout=15.0)
+            if res.status_code != 200:
+                return None
+            soup = BeautifulSoup(res.text, "html.parser")
+            caption_el = soup.select_one(".num-applicants__caption")
+            if not caption_el:
+                return None
+            text = caption_el.get_text(strip=True)
+            # Parse "41 applicants" or "Over 200 applicants"
+            match = re.search(r'([\d,]+)', text)
+            if match:
+                count = int(match.group(1).replace(',', ''))
+                return count
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get applicant count: {e}")
+            return None
+
+    @staticmethod
     async def fetch_linkedin_jobs(keyword: str, locations: List[str] = []) -> List[dict]:
-        """Crawl LinkedIn guest search for job postings restricting by locations."""
+        """Crawl LinkedIn guest search for job postings, filtering out 100+ applicant jobs."""
         jobs = []
-        # If no locations configured, query just the keyword
         queries = [keyword]
         if locations:
             queries = [f"{keyword} {loc}" for loc in locations]
 
         async with httpx.AsyncClient(timeout=15.0) as client:
+            # Pre-fetch blacklist URLs for fast lookup
+            blacklist_col = get_blacklisted_jobs_collection()
+            blacklisted_urls = set()
+            async for doc in blacklist_col.find({}, {"url": 1}):
+                blacklisted_urls.add(doc.get("url"))
+
             for query in queries:
                 url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={query}"
                 try:
@@ -77,7 +105,35 @@ class GeneralScraperService:
                             company = company_elem.get_text(strip=True) if company_elem else "Company"
                             location = location_elem.get_text(strip=True) if location_elem else "Remote"
                             link = link_elem.get("href", "")
-                            
+
+                            # Skip blacklisted URLs
+                            if link in blacklisted_urls:
+                                logger.info(f"Skipping blacklisted job: {title}")
+                                continue
+
+                            # Fetch detail page to check applicant count
+                            applicant_count = await GeneralScraperService._get_applicant_count(link, client)
+
+                            if applicant_count is not None and applicant_count >= 100:
+                                # Add to blacklist so future runs skip it
+                                try:
+                                    await blacklist_col.update_one(
+                                        {"url": link},
+                                        {"$set": {
+                                            "url": link,
+                                            "title": title,
+                                            "company": company,
+                                            "reason": f"{applicant_count} applicants",
+                                            "blacklisted_at": datetime.utcnow()
+                                        }},
+                                        upsert=True
+                                    )
+                                except Exception as be:
+                                    logger.error(f"Failed to blacklist job: {be}")
+                                blacklisted_urls.add(link)
+                                logger.info(f"Blacklisted {title}: {applicant_count} applicants")
+                                continue
+
                             jobs.append({
                                 "title": title,
                                 "url": link,

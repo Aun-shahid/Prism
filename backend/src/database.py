@@ -55,3 +55,17 @@ def get_email_logs_collection():
 def get_general_sources_collection():
     database = get_database()
     return database["general_scraper_sources"]
+
+def get_resume_versions_collection():
+    database = get_database()
+    return database["resume_versions"]
+
+def get_notifications_collection():
+    database = get_database()
+    return database["notifications"]
+
+def get_blacklisted_jobs_collection():
+    """Collection of job URLs excluded due to high applicant count (100+)."""
+    database = get_database()
+    return database["blacklisted_jobs"]
+

@@ -299,9 +299,9 @@ export default function DashboardPage() {
         <Grid container spacing={3} sx={{ mb: 5 }}>
           {[
             { label: 'Registered Users', count: adminStats.total_users, color: '#ec4899', icon: <PeopleIcon />, path: '/dashboard?tab=users' },
-            { label: 'Scraped Jobs (Total)', count: adminStats.total_jobs, color: '#3b82f6', icon: <SearchIcon />, path: '/dashboard/scraper' },
-            { label: 'General Crawler Feeds', count: adminStats.total_sources, color: '#f59e0b', icon: <LanguageIcon />, path: '/dashboard/scraper' },
-            { label: 'Career Targets', count: adminStats.total_targets, color: '#10b981', icon: <WorkIcon />, path: '/dashboard/scraper' }
+            { label: 'Scraped Jobs (Total)', count: adminStats.total_jobs, color: '#3b82f6', icon: <SearchIcon />, path: '/dashboard/watchlist' },
+            { label: 'General Crawler Feeds', count: adminStats.total_sources, color: '#f59e0b', icon: <LanguageIcon />, path: '/dashboard/watchlist' },
+            { label: 'Career Targets', count: adminStats.total_targets, color: '#10b981', icon: <WorkIcon />, path: '/dashboard/watchlist' }
           ].map((card) => (
             <Grid size={{ xs: 12, sm: 6, md: 3 }} key={card.label}>
               <Card 
@@ -352,7 +352,7 @@ export default function DashboardPage() {
                   <Button 
                     variant="outlined" 
                     fullWidth 
-                    onClick={() => router.push('/dashboard/scraper')}
+                    onClick={() => router.push('/dashboard/watchlist')}
                   >
                     Configure Target Locations & RSS
                   </Button>

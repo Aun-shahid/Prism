@@ -15,6 +15,8 @@ from ..models.general_sources import (
 from ..models.users import User
 from ..services.scraper_service import ScraperService
 from ..auth.dependencies import get_current_active_user, require_super_admin
+from ..database import get_blacklisted_jobs_collection
+from datetime import datetime
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
@@ -152,3 +154,49 @@ async def trigger_general_scrape(
     from ..services.general_scraper_service import GeneralScraperService
     jobs = await GeneralScraperService.scrape_single_source_for_user(admin_user.id, source_id)
     return jobs
+
+
+# ─── Blacklisted Jobs ─────────────────────────────────────────────────────────
+
+@router.get("/blacklist", response_model=List[dict])
+async def list_blacklisted_jobs(
+    current_user: User = Depends(get_current_active_user),
+):
+    """List all blacklisted job URLs (jobs skipped due to 100+ applicants)."""
+    col = get_blacklisted_jobs_collection()
+    cursor = col.find({"user_id": {"$exists": False}}).sort("blacklisted_at", -1)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+
+@router.delete("/blacklist/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_from_blacklist(
+    job_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Remove a job from the blacklist so it can be re-evaluated."""
+    from bson import ObjectId
+    col = get_blacklisted_jobs_collection()
+    try:
+        oid = ObjectId(job_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ID")
+    result = await col.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return None
+
+
+@router.delete("/blacklist", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_blacklist(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Clear the entire blacklist."""
+    col = get_blacklisted_jobs_collection()
+    result = await col.delete_many({"user_id": {"$exists": False}})
+    logger = __import__("logging").getLogger("scraper_router")
+    logger.info(f"Cleared {result.deleted_count} blacklisted jobs")
+    return None

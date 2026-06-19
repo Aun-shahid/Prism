@@ -1,0 +1,10 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        ".\\venv\\Scripts\\activate": true,
+        "uvicorn": true,
+        "/^cd d:\\\\Work\\\\Python\\\\Prism\\\\backend; \\.\\\\venv\\\\Scripts\\\\Activate\\.ps1; python -c \"import py_compile; py_compile\\.compile\\('cleanup_linkedin_jobs\\.py', doraise=True\\); print\\('Syntax OK'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
