@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { gmailService, GmailStatus, EmailLog } from '../../../services/gmail';
 import { applicationsService, JobApplication } from '../../../services/applications';
 import { resumeService, GeneratedDocument } from '../../../services/resume';
@@ -38,6 +38,8 @@ import InfoIcon from '@mui/icons-material/Info';
 
 export default function GmailPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const appIdParam = searchParams.get('app_id');
 
   // Integrations states
@@ -48,6 +50,24 @@ export default function GmailPage() {
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+
+  // Reflect the OAuth callback's redirect (?gmail=connected|error) as an alert,
+  // then strip it from the URL so a refresh doesn't re-show it.
+  React.useEffect(() => {
+    const gmailResult = searchParams.get('gmail');
+    if (!gmailResult) return;
+    if (gmailResult === 'connected') {
+      setSuccess('Gmail connected successfully.');
+    } else if (gmailResult === 'error') {
+      setError(searchParams.get('message') || 'Failed to connect Gmail.');
+    }
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('gmail');
+    rest.delete('message');
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form compose states
   const [selectedAppId, setSelectedAppId] = React.useState(appIdParam || '');

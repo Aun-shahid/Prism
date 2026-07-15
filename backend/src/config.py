@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/gmail/callback"
 
+    # --- Frontend (for redirecting back after OAuth callbacks) ---
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # --- Scraper ---
     # Base cadence for per-company target scrapes; general feeds run at 2x this.
     SCRAPER_INTERVAL_HOURS: int = 4

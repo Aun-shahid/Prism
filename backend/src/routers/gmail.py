@@ -1,11 +1,19 @@
+from urllib.parse import quote
 from typing import List
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import RedirectResponse
 from ..models.gmail import EmailSendRequest, GmailStatusResponse, EmailLogResponse
 from ..models.users import User
 from ..services.gmail_service import GmailService
+from ..services.logging_service import get_logger
 from ..auth.dependencies import get_current_active_user
+from ..config import settings
+
+logger = get_logger("gmail_router")
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
+
+_GMAIL_PAGE_URL = f"{settings.FRONTEND_URL.rstrip('/')}/dashboard/gmail"
 
 
 @router.get("/connect")
@@ -19,15 +27,25 @@ async def start_gmail_oauth(
 
 @router.get("/callback")
 async def gmail_oauth_callback(
-    code: str = Query(...),
-    state: str = Query(...),
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None),
 ):
     """
-    OAuth callback handler. Google redirects here with the authorization code.
-    The 'state' parameter contains the user_id.
+    OAuth callback handler. Google redirects the browser here with the
+    authorization code (or an error, e.g. the user declined consent). Always
+    redirect back into the app rather than showing a bare JSON page.
     """
-    connection = await GmailService.handle_callback(user_id=state, auth_code=code)
-    return {"detail": "Gmail connected successfully", "email": connection.google_email}
+    if error or not code or not state:
+        return RedirectResponse(f"{_GMAIL_PAGE_URL}?gmail=error&message={quote(error or 'Gmail connection was cancelled.')}")
+
+    try:
+        await GmailService.handle_callback(user_id=state, auth_code=code)
+        return RedirectResponse(f"{_GMAIL_PAGE_URL}?gmail=connected")
+    except Exception as e:
+        logger.error(f"Gmail OAuth callback failed for user {state}: {e}")
+        message = getattr(e, "detail", None) or "Failed to connect Gmail. Please try again."
+        return RedirectResponse(f"{_GMAIL_PAGE_URL}?gmail=error&message={quote(str(message))}")
 
 
 @router.get("/status", response_model=GmailStatusResponse)
