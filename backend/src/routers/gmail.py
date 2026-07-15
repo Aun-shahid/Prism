@@ -51,6 +51,9 @@ async def send_email(
         subject=data.subject,
         body=data.body,
         application_id=data.application_id,
+        cc=data.cc,
+        bcc=data.bcc,
+        attachments=data.attachments,
     )
     return log
 

@@ -36,6 +36,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import KeyIcon from '@mui/icons-material/Key';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
+import EmailOutreachSettings from './EmailOutreachSettings';
 
 export default function SettingsPage() {
   const { user, checkAuth } = useAuth();
@@ -319,6 +320,9 @@ export default function SettingsPage() {
           </Grid>
         )}
       </Grid>
+
+      {/* Email Outreach settings (how the AI writes + send guardrails + inbound) */}
+      {user?.role !== 'super_admin' && <EmailOutreachSettings />}
 
       {/* Configure Key Dialog */}
       <Dialog open={openKeyDialog} onClose={() => setOpenKeyDialog(false)} fullWidth maxWidth="xs">

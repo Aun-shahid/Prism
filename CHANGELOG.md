@@ -5,7 +5,32 @@ All notable changes to Prism are documented here. Format loosely follows
 
 ## [Unreleased]
 
-### Added
+### Added — AI email outreach (apply by email + HR auto-reply)
+- **Apply by email:** paste a job posting on the Gmail page → Prism extracts the
+  recipient (pure regex, no AI), writes a tailored application email in one AI
+  call grounded in your profile, and sends it via your connected Gmail. Draft is
+  shown for review by default; an **auto-send** toggle (with a cancel window)
+  skips review. (`services/email_outreach_service.py`, `routers/outreach.py`,
+  `dashboard/gmail/ApplyByEmail.tsx`.)
+- **Resume attachment:** optionally attach a chosen resume version as a PDF,
+  reusing the builder's browser export — `send_email` now builds `multipart/mixed`
+  with a plain-text **and** HTML body plus file attachments (previously HTML-only).
+- **HR reply loop (opt-in):** watches only the threads you started, classifies new
+  recruiter replies, and either drafts a response for review or auto-sends it
+  (per settings). Runs on a 15-min scheduler poll; surfaces via the existing
+  notification stream. Needs the wider Gmail read/compose scopes → reconnect once.
+  (`services/inbound_reply_service.py`, `dashboard/gmail/HrReplies.tsx`.)
+- **Email Outreach settings** (Settings page): custom instructions, tone & length,
+  signature & sender name, resume-attach default, auto-send, daily send cap,
+  CC-self, already-emailed warning, and the inbound toggles. New per-user
+  `email_settings` store mirrors the encrypted `api_keys` pattern.
+- **Pipeline link + guardrails:** each sent application is logged to the
+  applications pipeline (status → applied); server enforces a daily send cap and
+  an already-emailed warning. The assistant and this flow now share one email
+  prompt so they write in the same voice. No new AI in hot paths — one call per
+  compose, one per HR reply ([[prism-cost-constraint]]).
+
+### Added — scraper
 - **Job-preference exclusions are now enforced by the scraper.** The free-text
   `job_preferences.exclusions` list (companies / keywords / locations) is applied
   in both scraping paths so matching postings are never stored. If an exclusion

@@ -4,6 +4,13 @@ export interface GmailStatus {
   is_connected: boolean;
   google_email?: string;
   connected_at?: string;
+  inbound_ready?: boolean; // true once read/compose scopes are granted
+}
+
+export interface EmailAttachment {
+  filename: string;
+  mime_type: string;
+  content_b64: string;
 }
 
 export interface EmailSendPayload {
@@ -11,6 +18,9 @@ export interface EmailSendPayload {
   subject: string;
   body: string; // can be HTML
   application_id?: string;
+  cc?: string;
+  bcc?: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailLog {
@@ -22,6 +32,10 @@ export interface EmailLog {
   application_id?: string;
   status: string; // "sent" | "failed"
   error_message?: string;
+  thread_id?: string;
+  message_id?: string;
+  direction?: string;
+  category?: string;
 }
 
 export const gmailService = {

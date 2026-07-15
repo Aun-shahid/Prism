@@ -331,6 +331,8 @@ class AgentService:
         full_profile_text: Optional[str] = None,
     ) -> str:
         # Writing tasks get the whole profile; everything else gets the RAG sample.
+        from .email_outreach_service import BASE_EMAIL_TASK
+
         profile_context = full_profile_text if full_profile_text is not None \
             else RAGService.format_context(retrieved)
 
@@ -365,19 +367,7 @@ class AgentService:
             base += f"\n{company_context}\n"
 
         intent_instructions = {
-            "generate_email": (
-                "\nTASK: Write a job application / outreach email.\n"
-                "- Start with a suggested subject line (as 'Subject: ...').\n"
-                "- Keep the body under 180 words: hook, 2-3 concrete proof points drawn "
-                "from the user's real experience matched to the role, and a confident, "
-                "low-friction call to action.\n"
-                "- Weave in one specific company detail from the research if available — "
-                "it should feel researched, not templated.\n"
-                "- Sound like a strong human candidate: direct, warm, zero clichés "
-                "('I am writing to express...' is banned).\n"
-                "- After the email, add a short '---' separated note listing what you "
-                "personalized and anything the user should verify or fill in."
-            ),
+            "generate_email": BASE_EMAIL_TASK,
             "generate_cover_letter": (
                 "\nTASK: Write a cover letter (3-4 short paragraphs).\n"
                 "- Open with genuine specificity about the company/role, not flattery.\n"

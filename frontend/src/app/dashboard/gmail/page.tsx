@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { gmailService, GmailStatus, EmailLog } from '../../../services/gmail';
 import { applicationsService, JobApplication } from '../../../services/applications';
 import { resumeService, GeneratedDocument } from '../../../services/resume';
+import ApplyByEmail from './ApplyByEmail';
+import HrReplies from './HrReplies';
 import {
   Box,
   Typography,
@@ -201,6 +203,10 @@ export default function GmailPage() {
 
       {error && <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
+
+      {/* AI apply-by-email + inbound HR replies */}
+      <ApplyByEmail status={status} onSent={loadData} />
+      <HrReplies status={status} />
 
       {!status?.is_connected ? (
         /* Not Connected View */

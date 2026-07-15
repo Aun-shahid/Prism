@@ -52,6 +52,16 @@ def get_email_logs_collection():
     database = get_database()
     return database["email_logs"]
 
+def get_email_settings_collection():
+    """Per-user email outreach settings (how the AI writes + send guardrails)."""
+    database = get_database()
+    return database["email_settings"]
+
+def get_email_drafts_collection():
+    """AI-composed application emails awaiting review/send."""
+    database = get_database()
+    return database["email_drafts"]
+
 def get_general_sources_collection():
     database = get_database()
     return database["general_scraper_sources"]

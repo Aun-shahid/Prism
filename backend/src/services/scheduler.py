@@ -9,6 +9,7 @@ from ..database import (
 )
 from .scraper_service import ScraperService
 from .general_scraper_service import GeneralScraperService
+from .inbound_reply_service import run_inbound_reply_poll
 from .logging_service import get_logger
 
 logger = get_logger("scheduler")
@@ -20,6 +21,7 @@ _INTERVAL_HOURS = max(1, settings.SCRAPER_INTERVAL_HOURS)
 TARGET_SCRAPE_INTERVAL = _INTERVAL_HOURS * 60 * 60
 GENERAL_SCRAPE_INTERVAL = _INTERVAL_HOURS * 2 * 60 * 60
 CLEANUP_INTERVAL = 24 * 60 * 60          # Every 24 hours
+INBOUND_POLL_INTERVAL = 15 * 60          # Check for HR replies every 15 minutes
 
 JOB_RETENTION_DAYS = 45                  # delete discovered jobs older than this
 STALE_NEW_DAYS = 14                      # stop flagging a job "new" after this many days
@@ -190,6 +192,7 @@ async def run_background_scheduler():
     target_timer = 0
     general_timer = 0
     cleanup_timer = 0
+    inbound_timer = 0
 
     tick = 60  # Check every 60 seconds
 
@@ -198,6 +201,14 @@ async def run_background_scheduler():
         target_timer += tick
         general_timer += tick
         cleanup_timer += tick
+        inbound_timer += tick
+
+        if inbound_timer >= INBOUND_POLL_INTERVAL:
+            inbound_timer = 0
+            try:
+                await run_inbound_reply_poll()
+            except Exception as e:
+                logger.error(f"Inbound reply poll failed: {e}")
 
         if target_timer >= TARGET_SCRAPE_INTERVAL:
             target_timer = 0
