@@ -69,6 +69,11 @@ class GmailService:
                 }
             },
             scopes=SCOPES,
+            # Confidential web app (has a client secret) with the auth-URL and the
+            # token exchange happening in separate stateless requests/workers, so we
+            # can't carry a PKCE verifier between them. Disable it — the client
+            # secret secures the exchange. (Library defaults this to True.)
+            autogenerate_code_verifier=False,
         )
         flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
 
@@ -100,6 +105,11 @@ class GmailService:
                 }
             },
             scopes=SCOPES,
+            # Confidential web app (has a client secret) with the auth-URL and the
+            # token exchange happening in separate stateless requests/workers, so we
+            # can't carry a PKCE verifier between them. Disable it — the client
+            # secret secures the exchange. (Library defaults this to True.)
+            autogenerate_code_verifier=False,
         )
         flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
 
