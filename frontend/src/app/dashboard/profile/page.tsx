@@ -62,10 +62,14 @@ export default function ProfilePage() {
 
   // Dialog states
   const [openDialog, setOpenDialog] = React.useState<'work' | 'edu' | 'proj' | 'cert' | null>(null);
-  
+  // When set, the open dialog is editing the item at this index (else adding a new one).
+  const [editIndex, setEditIndex] = React.useState<number | null>(null);
+  const closeItemDialog = () => { setOpenDialog(null); setEditIndex(null); };
+
   // Tag state for skills
   const [skillInput, setSkillInput] = React.useState('');
   const [jobTitleInput, setJobTitleInput] = React.useState('');
+  const [exclusionInput, setExclusionInput] = React.useState('');
 
   // CV Upload state & ref
   const [uploading, setUploading] = React.useState(false);
@@ -300,6 +304,27 @@ export default function ProfilePage() {
     setProfile(prev => prev ? { ...prev, job_preferences: updatedPrefs } : null);
   };
 
+  const handleAddExclusion = () => {
+    if (!profile || !exclusionInput.trim()) return;
+    const val = exclusionInput.trim();
+    const current = profile.job_preferences?.exclusions || [];
+    if (current.includes(val)) { setExclusionInput(''); return; }
+    setProfile(prev => prev ? {
+      ...prev,
+      job_preferences: { ...prev.job_preferences, exclusions: [...current, val] },
+    } : null);
+    setExclusionInput('');
+  };
+
+  const handleRemoveExclusion = (val: string) => {
+    if (!profile) return;
+    const current = profile.job_preferences?.exclusions || [];
+    setProfile(prev => prev ? {
+      ...prev,
+      job_preferences: { ...prev.job_preferences, exclusions: current.filter(x => x !== val) },
+    } : null);
+  };
+
   const handleSavePreferences = async () => {
     if (!profile) return;
     setSavingPrefs(true);
@@ -322,14 +347,29 @@ export default function ProfilePage() {
   const handleSaveWork = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updated = await profileService.addWorkExperience(workForm);
+      let updated: UserProfile;
+      if (editIndex !== null && profile) {
+        const arr = [...profile.work_experience];
+        arr[editIndex] = workForm;
+        updated = await profileService.updateProfile({ work_experience: arr });
+      } else {
+        updated = await profileService.addWorkExperience(workForm);
+      }
       setProfile(updated);
-      setOpenDialog(null);
+      closeItemDialog();
       setWorkForm({ company: '', title: '', location: '', start_date: '', end_date: '', description: '', highlights: [] });
       setHighlightInput('');
     } catch (err: any) {
-      alert('Failed to add work experience.');
+      alert('Failed to save work experience.');
     }
+  };
+
+  const openEditWork = (index: number) => {
+    if (!profile) return;
+    const w = profile.work_experience[index];
+    setWorkForm({ ...w, highlights: [...(w.highlights || [])] });
+    setEditIndex(index);
+    setOpenDialog('work');
   };
 
   const handleRemoveWork = async (index: number) => {
@@ -353,13 +393,27 @@ export default function ProfilePage() {
   const handleSaveEdu = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updated = await profileService.addEducation(eduForm);
+      let updated: UserProfile;
+      if (editIndex !== null && profile) {
+        const arr = [...profile.education];
+        arr[editIndex] = eduForm;
+        updated = await profileService.updateProfile({ education: arr });
+      } else {
+        updated = await profileService.addEducation(eduForm);
+      }
       setProfile(updated);
-      setOpenDialog(null);
+      closeItemDialog();
       setEduForm({ institution: '', degree: '', field_of_study: '', start_date: '', end_date: '', gpa: '', description: '' });
     } catch (err: any) {
-      alert('Failed to add education.');
+      alert('Failed to save education.');
     }
+  };
+
+  const openEditEdu = (index: number) => {
+    if (!profile) return;
+    setEduForm({ ...profile.education[index] });
+    setEditIndex(index);
+    setOpenDialog('edu');
   };
 
   const handleRemoveEdu = async (index: number) => {
@@ -376,14 +430,29 @@ export default function ProfilePage() {
   const handleSaveProj = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updated = await profileService.addProject(projForm);
+      let updated: UserProfile;
+      if (editIndex !== null && profile) {
+        const arr = [...profile.projects];
+        arr[editIndex] = projForm;
+        updated = await profileService.updateProfile({ projects: arr });
+      } else {
+        updated = await profileService.addProject(projForm);
+      }
       setProfile(updated);
-      setOpenDialog(null);
+      closeItemDialog();
       setProjForm({ name: '', description: '', technologies: [], url: '', start_date: '', end_date: '' });
       setTechInput('');
     } catch (err: any) {
-      alert('Failed to add project.');
+      alert('Failed to save project.');
     }
+  };
+
+  const openEditProj = (index: number) => {
+    if (!profile) return;
+    const p = profile.projects[index];
+    setProjForm({ ...p, technologies: [...(p.technologies || [])] });
+    setEditIndex(index);
+    setOpenDialog('proj');
   };
 
   const handleRemoveProj = async (index: number) => {
@@ -407,13 +476,27 @@ export default function ProfilePage() {
   const handleSaveCert = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updated = await profileService.addCertification(certForm);
+      let updated: UserProfile;
+      if (editIndex !== null && profile) {
+        const arr = [...profile.certifications];
+        arr[editIndex] = certForm;
+        updated = await profileService.updateProfile({ certifications: arr });
+      } else {
+        updated = await profileService.addCertification(certForm);
+      }
       setProfile(updated);
-      setOpenDialog(null);
+      closeItemDialog();
       setCertForm({ name: '', issuer: '', date: '', url: '' });
     } catch (err: any) {
-      alert('Failed to add certification.');
+      alert('Failed to save certification.');
     }
+  };
+
+  const openEditCert = (index: number) => {
+    if (!profile) return;
+    setCertForm({ ...profile.certifications[index] });
+    setEditIndex(index);
+    setOpenDialog('cert');
   };
 
   const handleRemoveCert = async (index: number) => {
@@ -629,9 +712,10 @@ export default function ProfilePage() {
                           {w.start_date} - {w.end_date || 'Present'}
                         </Typography>
                       </Box>
-                      <IconButton color="error" onClick={() => handleRemoveWork(idx)}>
-                        <DeleteIcon />
-                      </IconButton>
+                      <Stack direction="row" spacing={0.5}>
+                        <IconButton onClick={() => openEditWork(idx)} title="Edit"><EditIcon /></IconButton>
+                        <IconButton color="error" onClick={() => handleRemoveWork(idx)} title="Remove"><DeleteIcon /></IconButton>
+                      </Stack>
                     </Stack>
                     
                     {w.description && (
@@ -689,9 +773,10 @@ export default function ProfilePage() {
                             </a>
                           )}
                         </Box>
-                        <IconButton color="error" size="small" onClick={() => handleRemoveProj(idx)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        <Stack direction="row" spacing={0.5}>
+                          <IconButton size="small" onClick={() => openEditProj(idx)} title="Edit"><EditIcon fontSize="small" /></IconButton>
+                          <IconButton color="error" size="small" onClick={() => handleRemoveProj(idx)} title="Remove"><DeleteIcon fontSize="small" /></IconButton>
+                        </Stack>
                       </Stack>
                       
                       <Typography variant="body2" sx={{ color: 'text.secondary', flexGrow: 1, my: 1.5 }}>
@@ -741,9 +826,10 @@ export default function ProfilePage() {
                           {e.start_date} - {e.end_date}
                         </Typography>
                       </Box>
-                      <IconButton color="error" onClick={() => handleRemoveEdu(idx)}>
-                        <DeleteIcon />
-                      </IconButton>
+                      <Stack direction="row" spacing={0.5}>
+                        <IconButton onClick={() => openEditEdu(idx)} title="Edit"><EditIcon /></IconButton>
+                        <IconButton color="error" onClick={() => handleRemoveEdu(idx)} title="Remove"><DeleteIcon /></IconButton>
+                      </Stack>
                     </Stack>
                     
                     {e.description && (
@@ -856,7 +942,10 @@ export default function ProfilePage() {
                             secondary={`${c.issuer} ${c.date ? `• ${c.date}` : ''}`} 
                           />
                           <ListItemSecondaryAction>
-                            <IconButton edge="end" color="error" size="small" onClick={() => handleRemoveCert(idx)}>
+                            <IconButton color="primary" size="small" onClick={() => openEditCert(idx)} title="Edit">
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton edge="end" color="error" size="small" onClick={() => handleRemoveCert(idx)} title="Remove">
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </ListItemSecondaryAction>
@@ -1032,6 +1121,41 @@ export default function ProfilePage() {
                   </CardContent>
                 </Card>
 
+                {/* Exclusions Card */}
+                <Card>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 0.5, color: 'error.main' }}>
+                      Exclusions
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
+                      Companies, keywords, or locations to exclude from job matches (e.g. &quot;unpaid&quot;, &quot;Acme Corp&quot;, &quot;on-site only&quot;).
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                      <TextField
+                        label="Add exclusion"
+                        size="small"
+                        fullWidth
+                        value={exclusionInput}
+                        onChange={(e) => setExclusionInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddExclusion())}
+                        placeholder="e.g. Unpaid, Acme Corp"
+                      />
+                      <Button variant="outlined" color="error" onClick={handleAddExclusion}>Add</Button>
+                    </Stack>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {!profile?.job_preferences?.exclusions || profile.job_preferences.exclusions.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          No exclusions set.
+                        </Typography>
+                      ) : (
+                        profile.job_preferences.exclusions.map(x => (
+                          <Chip key={x} label={x} onDelete={() => handleRemoveExclusion(x)} color="error" variant="outlined" />
+                        ))
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+
                 {/* Save Changes button */}
                 <Button
                   variant="contained"
@@ -1041,7 +1165,7 @@ export default function ProfilePage() {
                   startIcon={savingPrefs ? <CircularProgress size={20} /> : <SaveIcon />}
                   sx={{ py: 1.5, alignSelf: 'flex-start' }}
                 >
-                  Save Location Preferences
+                  Save Preferences
                 </Button>
               </Stack>
             </Grid>
@@ -1052,9 +1176,9 @@ export default function ProfilePage() {
       {/* --- ADD DIALOGS --- */}
 
       {/* Add Work Experience Dialog */}
-      <Dialog open={openDialog === 'work'} onClose={() => setOpenDialog(null)} fullWidth maxWidth="sm">
+      <Dialog open={openDialog === 'work'} onClose={closeItemDialog} fullWidth maxWidth="sm">
         <Box component="form" onSubmit={handleSaveWork}>
-          <DialogTitle sx={{ fontWeight: 800 }}>Add Work Experience</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>{editIndex !== null ? 'Edit' : 'Add'} Work Experience</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
               <TextField 
@@ -1131,16 +1255,16 @@ export default function ProfilePage() {
             </Stack>
           </DialogContent>
           <DialogActions sx={{ p: 3 }}>
-            <Button onClick={() => setOpenDialog(null)}>Cancel</Button>
-            <Button variant="contained" type="submit">Add Entry</Button>
+            <Button onClick={closeItemDialog}>Cancel</Button>
+            <Button variant="contained" type="submit">{editIndex !== null ? 'Save Changes' : 'Add Entry'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
 
       {/* Add Project Dialog */}
-      <Dialog open={openDialog === 'proj'} onClose={() => setOpenDialog(null)} fullWidth maxWidth="sm">
+      <Dialog open={openDialog === 'proj'} onClose={closeItemDialog} fullWidth maxWidth="sm">
         <Box component="form" onSubmit={handleSaveProj}>
-          <DialogTitle sx={{ fontWeight: 800 }}>Add Project</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>{editIndex !== null ? 'Edit' : 'Add'} Project</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
               <TextField 
@@ -1203,16 +1327,16 @@ export default function ProfilePage() {
             </Stack>
           </DialogContent>
           <DialogActions sx={{ p: 3 }}>
-            <Button onClick={() => setOpenDialog(null)}>Cancel</Button>
-            <Button variant="contained" type="submit">Add Project</Button>
+            <Button onClick={closeItemDialog}>Cancel</Button>
+            <Button variant="contained" type="submit">{editIndex !== null ? 'Save Changes' : 'Add Project'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
 
       {/* Add Education Dialog */}
-      <Dialog open={openDialog === 'edu'} onClose={() => setOpenDialog(null)} fullWidth maxWidth="sm">
+      <Dialog open={openDialog === 'edu'} onClose={closeItemDialog} fullWidth maxWidth="sm">
         <Box component="form" onSubmit={handleSaveEdu}>
-          <DialogTitle sx={{ fontWeight: 800 }}>Add Education</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>{editIndex !== null ? 'Edit' : 'Add'} Education</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
               <TextField 
@@ -1271,16 +1395,16 @@ export default function ProfilePage() {
             </Stack>
           </DialogContent>
           <DialogActions sx={{ p: 3 }}>
-            <Button onClick={() => setOpenDialog(null)}>Cancel</Button>
-            <Button variant="contained" type="submit">Add Entry</Button>
+            <Button onClick={closeItemDialog}>Cancel</Button>
+            <Button variant="contained" type="submit">{editIndex !== null ? 'Save Changes' : 'Add Entry'}</Button>
           </DialogActions>
         </Box>
       </Dialog>
 
       {/* Add Certification Dialog */}
-      <Dialog open={openDialog === 'cert'} onClose={() => setOpenDialog(null)} fullWidth maxWidth="sm">
+      <Dialog open={openDialog === 'cert'} onClose={closeItemDialog} fullWidth maxWidth="sm">
         <Box component="form" onSubmit={handleSaveCert}>
-          <DialogTitle sx={{ fontWeight: 800 }}>Add Certification</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>{editIndex !== null ? 'Edit' : 'Add'} Certification</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
               <TextField 
@@ -1313,8 +1437,8 @@ export default function ProfilePage() {
             </Stack>
           </DialogContent>
           <DialogActions sx={{ p: 3 }}>
-            <Button onClick={() => setOpenDialog(null)}>Cancel</Button>
-            <Button variant="contained" type="submit">Add Cert</Button>
+            <Button onClick={closeItemDialog}>Cancel</Button>
+            <Button variant="contained" type="submit">{editIndex !== null ? 'Save Changes' : 'Add Cert'}</Button>
           </DialogActions>
         </Box>
       </Dialog>

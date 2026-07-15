@@ -69,3 +69,21 @@ def get_blacklisted_jobs_collection():
     database = get_database()
     return database["blacklisted_jobs"]
 
+def get_chat_conversations_collection():
+    database = get_database()
+    return database["chat_conversations"]
+
+def get_chat_messages_collection():
+    database = get_database()
+    return database["chat_messages"]
+
+def get_rag_documents_collection():
+    """Per-user career knowledge base documents (RAG)."""
+    database = get_database()
+    return database["rag_documents"]
+
+def get_rag_index_meta_collection():
+    """Per-user RAG index metadata (fingerprint, doc count, embedding provider)."""
+    database = get_database()
+    return database["rag_index_meta"]
+

@@ -1,11 +1,12 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..models.scraper import (
     ScraperTargetCreateRequest,
     ScraperTargetUpdateRequest,
     ScraperTargetResponse,
     ScrapedJobResponse,
     PaginatedScrapedJobsResponse,
+    WatchCompanyRequest,
 )
 from ..models.general_sources import (
     GeneralScraperSourceCreateRequest,
@@ -30,6 +31,30 @@ async def add_scraper_target(
 ):
     """Add a new company career page to scrape."""
     target = await ScraperService.add_target(current_user.id, data)
+    return target
+
+
+@router.post("/targets/watch", response_model=ScraperTargetResponse, status_code=status.HTTP_201_CREATED)
+async def watch_company(
+    data: WatchCompanyRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Add a company to the watchlist by name only. AI research runs in the
+    background to find the website, careers/jobs pages and a company brief —
+    poll the target list until research_status settles.
+    """
+    target = await ScraperService.watch_company(current_user.id, data)
+    return target
+
+
+@router.post("/targets/{target_id}/research", response_model=ScraperTargetResponse)
+async def research_target(
+    target_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """(Re-)run AI company research for an existing watchlist target."""
+    target = await ScraperService.start_target_research(current_user.id, target_id)
     return target
 
 

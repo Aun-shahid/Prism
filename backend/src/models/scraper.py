@@ -7,10 +7,21 @@ class ScraperTarget(BaseModel):
     id: Optional[str] = Field(default=None, alias="_id")
     user_id: str
     company_name: str
-    career_url: str
+    career_url: Optional[str] = None
     keywords: List[str] = []
     is_active: bool = True
     last_scraped: Optional[datetime] = None
+    # AI company research fields
+    website: Optional[str] = None
+    jobs_url: Optional[str] = None
+    description: Optional[str] = None
+    industry: Optional[str] = None
+    headquarters: Optional[str] = None
+    company_size: Optional[str] = None
+    talking_points: List[str] = []
+    research_status: str = "none"  # none | pending | completed | failed
+    researched_at: Optional[datetime] = None
+    research_sources: List[str] = []
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -29,6 +40,13 @@ class ScrapedJob(BaseModel):
     matched_keywords: List[str] = []
     is_new: bool = True
     discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    # --- de-duplication + freshness (optional; older docs won't have them) ---
+    dedup_key: Optional[str] = None          # normalized URL used to detect duplicates
+    first_seen: Optional[datetime] = None    # first time this posting was discovered
+    last_seen: Optional[datetime] = None     # most recent scrape that still saw it
+    company: Optional[str] = None            # resolved company name, when known
+    location: Optional[str] = None           # posting location, when known
+    source: Optional[str] = None             # e.g. "greenhouse", "lever", "html", "rss"
 
     class Config:
         populate_by_name = True
@@ -37,8 +55,15 @@ class ScrapedJob(BaseModel):
 
 class ScraperTargetCreateRequest(BaseModel):
     company_name: str
-    career_url: str
+    career_url: Optional[str] = None
     keywords: List[str] = []
+
+
+class WatchCompanyRequest(BaseModel):
+    """Add a company to the watchlist by name only — AI research fills the rest."""
+    company_name: str
+    keywords: List[str] = []
+    preferred_provider: Optional[str] = None
 
 
 class ScraperTargetUpdateRequest(BaseModel):
@@ -52,10 +77,20 @@ class ScraperTargetResponse(BaseModel):
     id: str
     user_id: str
     company_name: str
-    career_url: str
+    career_url: Optional[str] = None
     keywords: List[str] = []
     is_active: bool
     last_scraped: Optional[datetime] = None
+    website: Optional[str] = None
+    jobs_url: Optional[str] = None
+    description: Optional[str] = None
+    industry: Optional[str] = None
+    headquarters: Optional[str] = None
+    company_size: Optional[str] = None
+    talking_points: List[str] = []
+    research_status: str = "none"
+    researched_at: Optional[datetime] = None
+    research_sources: List[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -73,6 +108,11 @@ class ScrapedJobResponse(BaseModel):
     matched_keywords: List[str] = []
     is_new: bool
     discovered_at: datetime
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    source: Optional[str] = None
 
     class Config:
         populate_by_name = True

@@ -40,6 +40,7 @@ export interface JobPreferences {
   onsite: string[];
   remote: string[];
   hybrid: string[];
+  exclusions: string[];
 }
 
 export interface UserProfile {

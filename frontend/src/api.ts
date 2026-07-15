@@ -4,6 +4,11 @@ import config from './config';
 const api = axios.create({
   baseURL: config.apiUrl,
   withCredentials: true,
+  // Safety net: without a timeout, an unreachable or wedged backend leaves
+  // requests pending forever — which freezes the login page on its loading
+  // spinner. 20s is generous for normal endpoints; AI endpoints that stream
+  // for longer can override per-call via { timeout } if needed.
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },

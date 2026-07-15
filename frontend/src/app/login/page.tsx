@@ -90,22 +90,12 @@ export default function LoginPage() {
         <Card sx={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)', bgcolor: 'rgba(17, 24, 39, 0.7)', backdropFilter: 'blur(10px)' }}>
           <CardContent sx={{ p: 4 }}>
             <Stack spacing={3} sx={{ alignItems: 'center' }}>
-              <Box 
-                sx={{ 
-                  width: 40, 
-                  height: 40, 
-                  borderRadius: 1, 
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 'bold',
-                  color: '#fff',
-                  fontSize: '1.25rem'
-                }}
-              >
-                P
-              </Box>
+              <Box
+                component="img"
+                src="/prism_logo.png"
+                alt="Prism"
+                sx={{ width: 56, height: 56, objectFit: 'contain', display: 'block' }}
+              />
               <Typography variant="h5" sx={{ fontWeight: 800, textAlign: 'center' }}>
                 Sign In to Prism
               </Typography>

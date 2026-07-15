@@ -17,6 +17,7 @@ from ..models.scraper import (
     ScrapedJob,
     ScraperTargetCreateRequest,
     ScraperTargetUpdateRequest,
+    WatchCompanyRequest,
 )
 from ..models.general_sources import (
     GeneralScraperSource,
@@ -24,6 +25,8 @@ from ..models.general_sources import (
     GeneralScraperSourceUpdateRequest,
 )
 from .logging_service import get_logger
+from .scraper_utils import normalize_job_url, is_excluded, looks_like_job_link
+from . import ats_service
 
 logger = get_logger("scraper_service")
 
@@ -65,6 +68,7 @@ class ScraperService:
             "keywords": [kw.lower().strip() for kw in data.keywords],
             "is_active": True,
             "last_scraped": None,
+            "research_status": "none",
             "created_at": now,
             "updated_at": now,
         }
@@ -72,6 +76,125 @@ class ScraperService:
         doc["_id"] = str(result.inserted_id)
         logger.info(f"Added scraper target '{data.company_name}' for user {user_id}")
         return ScraperTarget(**doc)
+
+    @staticmethod
+    async def watch_company(user_id: str, data: WatchCompanyRequest) -> ScraperTarget:
+        """
+        Add a company to the watchlist by name only. Creates the target
+        immediately (research_status="pending") and runs AI web research in
+        the background to fill in the website, careers/jobs URLs and company
+        brief. The frontend polls the target list until research settles.
+        """
+        import asyncio
+
+        collection = get_scraper_targets_collection()
+        now = datetime.utcnow()
+        doc = {
+            "user_id": user_id,
+            "company_name": data.company_name.strip(),
+            "career_url": None,
+            "keywords": [kw.lower().strip() for kw in data.keywords],
+            "is_active": True,
+            "last_scraped": None,
+            "research_status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await collection.insert_one(doc)
+        target_id = str(result.inserted_id)
+        doc["_id"] = target_id
+
+        asyncio.create_task(
+            ScraperService._research_target_task(
+                user_id, target_id, data.preferred_provider
+            )
+        )
+        logger.info(f"Watching company '{data.company_name}' for user {user_id} (research queued)")
+        return ScraperTarget(**doc)
+
+    @staticmethod
+    async def start_target_research(
+        user_id: str, target_id: str, preferred_provider: Optional[str] = None
+    ) -> ScraperTarget:
+        """(Re-)run AI research for an existing target, in the background."""
+        import asyncio
+
+        collection = get_scraper_targets_collection()
+        try:
+            oid = ObjectId(target_id)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid target ID")
+
+        doc = await collection.find_one_and_update(
+            {"_id": oid, "user_id": user_id},
+            {"$set": {"research_status": "pending", "updated_at": datetime.utcnow()}},
+            return_document=True,
+        )
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+
+        asyncio.create_task(
+            ScraperService._research_target_task(user_id, target_id, preferred_provider)
+        )
+        doc["_id"] = str(doc["_id"])
+        return ScraperTarget(**doc)
+
+    @staticmethod
+    async def _research_target_task(
+        user_id: str, target_id: str, preferred_provider: Optional[str] = None
+    ) -> None:
+        """Background task: research the company and persist the findings."""
+        from .web_research_service import WebResearchService
+
+        collection = get_scraper_targets_collection()
+        oid = ObjectId(target_id)
+        doc = await collection.find_one({"_id": oid, "user_id": user_id})
+        if not doc:
+            return
+        company_name = doc.get("company_name", "")
+
+        try:
+            brief, sources = await WebResearchService.research_company(
+                user_id, company_name, preferred_provider=preferred_provider
+            )
+            update = {
+                "website": brief.get("website"),
+                "jobs_url": brief.get("jobs_url"),
+                "description": brief.get("overview"),
+                "industry": brief.get("industry"),
+                "headquarters": brief.get("headquarters"),
+                "company_size": brief.get("company_size"),
+                "talking_points": brief.get("talking_points") or [],
+                "research_sources": sources,
+                "research_status": "completed",
+                "researched_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            # Only fill career_url if the user hasn't set one manually
+            if brief.get("careers_url") and not doc.get("career_url"):
+                update["career_url"] = brief["careers_url"]
+            await collection.update_one({"_id": oid}, {"$set": update})
+            logger.info(f"Company research completed for '{company_name}'")
+
+            try:
+                from .notification_service import NotificationService
+                await NotificationService.create_notification(
+                    user_id=user_id,
+                    title=f"Research complete: {company_name}",
+                    message=(
+                        f"We researched {company_name}"
+                        + (" and found their careers page." if update.get("career_url") or doc.get("career_url") else ".")
+                    ),
+                    type="research",
+                )
+            except Exception as e:
+                logger.error(f"Failed to create research notification: {e}")
+        except Exception as e:
+            logger.error(f"Company research failed for '{company_name}': {e}")
+            await collection.update_one(
+                {"_id": oid},
+                {"$set": {"research_status": "failed", "updated_at": datetime.utcnow()}},
+            )
 
     @staticmethod
     async def list_targets(user_id: str) -> List[ScraperTarget]:
@@ -131,8 +254,70 @@ class ScraperService:
         return True
 
     @staticmethod
+    async def _fetch_html_jobs(career_url: str) -> List[dict]:
+        """Fetch a career page and extract candidate posting links from raw HTML.
+
+        Returns a de-duplicated list of {title, url, location, source}. Applies a
+        noise filter so navigation / legal / social links don't pollute results.
+        """
+        from urllib.parse import urljoin
+
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                response = await client.get(career_url, headers=HEADERS)
+                response.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch {career_url}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to fetch career page: {str(e)}",
+            )
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        found: dict = {}  # normalized_url -> {title, url}
+
+        def _consider(text: str, href: str) -> None:
+            text = (text or "").strip()
+            if not text or not href:
+                return
+            if href.startswith("/"):
+                href = urljoin(career_url, href)
+            if not href.startswith("http"):
+                return
+            if not looks_like_job_link(text, href):
+                return
+            key = normalize_job_url(href)
+            if key and key not in found:
+                found[key] = {"title": text, "url": href}
+
+        # Prefer structured job-listing selectors first.
+        for pattern in JOB_LINK_PATTERNS:
+            try:
+                for link in soup.select(pattern):
+                    _consider(link.get_text(strip=True), link.get("href", ""))
+            except Exception:
+                continue
+
+        # Fallback: scan every link only if the selectors found nothing (still filtered).
+        if not found:
+            for link in soup.find_all("a", href=True):
+                _consider(link.get_text(strip=True), link["href"])
+
+        return [
+            {"title": v["title"], "url": v["url"], "location": None, "source": "html"}
+            for v in found.values()
+        ]
+
+    @staticmethod
     async def scrape_target(user_id: str, target_id: str) -> List[ScrapedJob]:
-        """Scrape a single target for job listings matching keywords."""
+        """Scrape a single target and record any NEW job postings.
+
+        Uses a structured ATS API when the careers URL is on a known platform
+        (Greenhouse/Lever/Ashby), otherwise falls back to filtered HTML scraping.
+        Applies the user's exclusion list, de-duplicates against previously seen
+        postings by normalized URL (single batched query, not N+1), refreshes
+        `last_seen` on postings still present, and only inserts genuinely new roles.
+        """
         targets_collection = get_scraper_targets_collection()
         jobs_collection = get_scraped_jobs_collection()
 
@@ -148,98 +333,113 @@ class ScraperService:
         target_doc["_id"] = str(target_doc["_id"])
         target = ScraperTarget(**target_doc)
 
-        # Fetch the page
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-                response = await client.get(
-                    target.career_url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch {target.career_url}: {e}")
+        scrape_url = target.jobs_url or target.career_url
+        if not scrape_url:
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to fetch career page: {str(e)}"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This company has no careers URL yet. Run AI research or add one manually.",
             )
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        discovered_jobs = []
+        now = datetime.utcnow()
 
-        # Extract job-related links
-        found_links = set()
-        for pattern in JOB_LINK_PATTERNS:
-            try:
-                for link in soup.select(pattern):
-                    href = link.get("href", "")
-                    text = link.get_text(strip=True)
-                    if text and href and len(text) > 3:
-                        # Normalise relative URLs
-                        if href.startswith("/"):
-                            from urllib.parse import urljoin
-                            href = urljoin(target.career_url, href)
-                        found_links.add((text, href))
-            except Exception:
-                continue
+        # 1. Gather raw candidates — structured ATS API first, HTML fallback.
+        candidates: List[dict] = []
+        ats = ats_service.detect_ats(scrape_url) or ats_service.detect_ats(target.career_url)
+        if ats:
+            provider, token = ats
+            for j in await ats_service.fetch_ats_jobs(provider, token):
+                candidates.append({
+                    "title": j["title"],
+                    "url": j["url"],
+                    "location": j.get("location"),
+                    "source": provider,
+                })
+        if not candidates:
+            candidates = await ScraperService._fetch_html_jobs(scrape_url)
 
-        # Also scan all links on the page if nothing was found with patterns
-        if not found_links:
-            for link in soup.find_all("a", href=True):
-                text = link.get_text(strip=True)
-                href = link["href"]
-                if text and len(text) > 5:
-                    if href.startswith("/"):
-                        from urllib.parse import urljoin
-                        href = urljoin(target.career_url, href)
-                    found_links.add((text, href))
-
-        # Match against keywords combined with user's target job titles from their profile
+        # 2. Load the user's matching keywords + exclusions.
         profile_collection = get_profiles_collection()
         profile_doc = await profile_collection.find_one({"user_id": user_id})
-        profile_keywords = []
-        if profile_doc and profile_doc.get("job_titles"):
-            profile_keywords = [t.lower().strip() for t in profile_doc["job_titles"] if t.strip()]
+        profile_keywords: List[str] = []
+        exclusions: List[str] = []
+        if profile_doc:
+            profile_keywords = [t.lower().strip() for t in profile_doc.get("job_titles", []) if t.strip()]
+            exclusions = (profile_doc.get("job_preferences") or {}).get("exclusions", []) or []
 
         keywords = [kw.lower() for kw in target.keywords] if target.keywords else []
         all_keywords = list(set(keywords + profile_keywords))
-        
-        now = datetime.utcnow()
 
-        for title, url in found_links:
+        # If the watched company itself matches an exclusion, skip the whole target.
+        if is_excluded(exclusions, target.company_name):
+            logger.info(f"Skipping target '{target.company_name}' — matches an exclusion term")
+            await targets_collection.update_one(
+                {"_id": oid}, {"$set": {"last_scraped": now, "updated_at": now}}
+            )
+            return []
+
+        # 3. Filter by keyword + exclusions, de-dup within this batch by normalized URL.
+        prepared: dict = {}  # dedup_key -> job doc
+        for cand in candidates:
+            title = cand["title"]
+            url = cand["url"]
             title_lower = title.lower()
             matched = [kw for kw in all_keywords if kw in title_lower] if all_keywords else []
-
-            # If filtering keywords are active, only include matching job titles/terms
             if all_keywords and not matched:
                 continue
-
-            # Check if this job already exists for this target
-            existing = await jobs_collection.find_one({
-                "target_id": target_id,
-                "user_id": user_id,
-                "title": title,
-                "url": url,
-            })
-            if existing:
+            if is_excluded(exclusions, title, target.company_name, cand.get("location"), url):
                 continue
-
-            job_doc = {
+            key = normalize_job_url(url)
+            if not key or key in prepared:
+                continue
+            loc = cand.get("location")
+            prepared[key] = {
                 "target_id": target_id,
                 "user_id": user_id,
                 "title": title,
                 "url": url,
-                "description_snippet": None,
+                "description_snippet": f"{target.company_name} | {loc}" if loc else None,
                 "matched_keywords": matched,
                 "is_new": True,
                 "discovered_at": now,
+                "first_seen": now,
+                "last_seen": now,
+                "dedup_key": key,
+                "company": target.company_name,
+                "location": loc,
+                "source": cand.get("source", "html"),
             }
-            result = await jobs_collection.insert_one(job_doc)
-            job_doc["_id"] = str(result.inserted_id)
-            discovered_jobs.append(ScrapedJob(**job_doc))
 
-        # Update last_scraped timestamp
+        # 4. One query to find which postings we already have for this target.
+        discovered_jobs: List[ScrapedJob] = []
+        if prepared:
+            existing_keys = set()
+            cursor = jobs_collection.find(
+                {"target_id": target_id, "user_id": user_id},
+                {"dedup_key": 1, "url": 1},
+            )
+            async for doc in cursor:
+                if doc.get("dedup_key"):
+                    existing_keys.add(doc["dedup_key"])
+                elif doc.get("url"):
+                    existing_keys.add(normalize_job_url(doc["url"]))
+
+            new_docs = [job for key, job in prepared.items() if key not in existing_keys]
+            seen_keys = [key for key in prepared if key in existing_keys]
+
+            if new_docs:
+                result = await jobs_collection.insert_many(new_docs)
+                for job, inserted_id in zip(new_docs, result.inserted_ids):
+                    job["_id"] = str(inserted_id)
+                    discovered_jobs.append(ScrapedJob(**job))
+
+            # Refresh last_seen on postings still present so freshness stays accurate.
+            if seen_keys:
+                await jobs_collection.update_many(
+                    {"target_id": target_id, "user_id": user_id, "dedup_key": {"$in": seen_keys}},
+                    {"$set": {"last_seen": now}},
+                )
+
+        # 5. Stamp the scrape time.
         await targets_collection.update_one(
             {"_id": oid},
             {"$set": {"last_scraped": now, "updated_at": now}}

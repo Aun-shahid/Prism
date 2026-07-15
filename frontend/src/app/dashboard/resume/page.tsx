@@ -6,10 +6,11 @@ import {
   Tooltip, Chip, Divider, TextField, FormControl, InputLabel,
   Select, MenuItem, Switch, Slider, Accordion, AccordionSummary,
   AccordionDetails, Dialog, DialogTitle, DialogContent, DialogActions,
-  Drawer, Popover, AppBar, Toolbar,
+  Drawer, Popover, AppBar, Toolbar, Snackbar, Paper,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
@@ -24,15 +25,21 @@ import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
 import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
 import FormatAlignJustifyIcon from '@mui/icons-material/FormatAlignJustify';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
+import SyncIcon from '@mui/icons-material/Sync';
 
 import { useAuth } from '../../../hooks/useAuth';
 import { profileService, UserProfile } from '../../../services/profile';
 import { applicationsService, JobApplication } from '../../../services/applications';
-import { resumeService } from '../../../services/resume';
+import { resumeService, TailorResult } from '../../../services/resume';
 import {
   resumeVersionApi,
   initVersionFromProfile,
   genId,
+  applyResumeOperations,
+  mergeProfileIntoSections,
+  annotateResumeDiff,
   ResumeVersion,
   ResumeCustomization,
   ResumeLayout,
@@ -53,6 +60,7 @@ import {
   GOOGLE_FONTS_URL,
 } from '../../../services/resumeBuilder';
 import ResumeTemplate from './ResumeTemplate';
+import ResumeDiffPreview from './ResumeDiffPreview';
 
 // ─── Thin scrollbar sx helper ─────────────────────────────────────────────────
 const thinScroll = {
@@ -64,6 +72,12 @@ const thinScroll = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function snakeToTitle(key: string) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatDate(value?: string): string {
+  if (!value) return '';
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString();
 }
 
 // ─── Word export ──────────────────────────────────────────────────────────────
@@ -188,6 +202,158 @@ const ColorRow = ({ label, value, onChange }: { label: string; value: string; on
   </Stack>
 );
 
+// ─── AI bullet coach field ────────────────────────────────────────────────────
+// A text field with an inline "improve with AI" button. On click it calls the
+// backend bullet coach and shows the best rewrite + alternatives + tips in a
+// popover; the user picks one to apply.
+function AiBulletField({
+  value,
+  onChange,
+  context,
+  multiline = false,
+  rows,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  context?: string;
+  multiline?: boolean;
+  rows?: number;
+  placeholder?: string;
+}) {
+  const [anchor, setAnchor] = React.useState<HTMLElement | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [result, setResult] = React.useState<import('../../../services/resume').BulletImproveResult | null>(null);
+
+  const run = async (e: React.MouseEvent<HTMLElement>) => {
+    const target = e.currentTarget;
+    if (!value.trim()) return;
+    setAnchor(target);
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await resumeService.improveBullet({ text: value, context });
+      setResult(res);
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { detail?: string } } };
+      setError(ex.response?.data?.detail || 'Could not improve this line.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const apply = (text: string) => {
+    onChange(text);
+    setAnchor(null);
+  };
+
+  return (
+    <>
+      <Box sx={{ position: 'relative', flex: 1 }}>
+        <TextField
+          size="small"
+          fullWidth
+          multiline={multiline}
+          rows={rows}
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          slotProps={{ htmlInput: { style: { paddingRight: 30 } } }}
+        />
+        <Tooltip title="Improve with AI">
+          <span>
+            <IconButton
+              size="small"
+              onClick={run}
+              disabled={!value.trim()}
+              sx={{ position: 'absolute', top: 3, right: 3, color: 'secondary.main' }}
+            >
+              <AutoFixHighIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Box>
+
+      <Popover
+        open={Boolean(anchor)}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { width: 380, maxWidth: '90vw', p: 2 } } }}
+      >
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <AutoAwesomeIcon fontSize="small" color="secondary" />
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>AI suggestions</Typography>
+        </Stack>
+
+        {loading && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 2 }}>
+            <CircularProgress size={18} />
+            <Typography variant="body2" color="text.secondary">Rewriting for impact…</Typography>
+          </Box>
+        )}
+
+        {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
+
+        {result && (
+          <Stack spacing={1.25}>
+            <Box
+              sx={{
+                p: 1.25,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'secondary.main',
+                bgcolor: 'rgba(16,185,129,0.06)',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'rgba(16,185,129,0.12)' },
+              }}
+              onClick={() => apply(result.improved)}
+            >
+              <Typography variant="caption" sx={{ fontWeight: 700, color: 'secondary.main', display: 'block', mb: 0.25 }}>
+                Recommended
+              </Typography>
+              <Typography variant="body2">{result.improved}</Typography>
+            </Box>
+
+            {result.alternatives?.map((alt, i) => (
+              <Box
+                key={i}
+                sx={{
+                  p: 1.25,
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+                onClick={() => apply(alt)}
+              >
+                <Typography variant="body2">{alt}</Typography>
+              </Box>
+            ))}
+
+            {result.tips?.length > 0 && (
+              <Box sx={{ pt: 0.5 }}>
+                {result.tips.map((tip, i) => (
+                  <Stack key={i} direction="row" spacing={0.75} sx={{ alignItems: 'flex-start', mb: 0.5 }}>
+                    <TipsAndUpdatesIcon sx={{ fontSize: 14, color: 'warning.main', mt: '2px' }} />
+                    <Typography variant="caption" color="text.secondary">{tip}</Typography>
+                  </Stack>
+                ))}
+              </Box>
+            )}
+            <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+              Click a suggestion to apply it
+            </Typography>
+          </Stack>
+        )}
+      </Popover>
+    </>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ResumeBuilderPage() {
   const { user } = useAuth();
@@ -208,11 +374,15 @@ export default function ResumeBuilderPage() {
   const [downloadAnchor, setDownloadAnchor] = React.useState<HTMLElement | null>(null);
 
   // AI state
+  const [aiInstruction, setAiInstruction] = React.useState('');
   const [aiJobDesc, setAiJobDesc] = React.useState('');
   const [aiAppId, setAiAppId] = React.useState('');
-  const [aiGenType, setAiGenType] = React.useState<'both' | 'resume' | 'cover_letter'>('both');
+  const [aiGenType, setAiGenType] = React.useState<'both' | 'resume' | 'cover_letter'>('resume');
   const [aiLoading, setAiLoading] = React.useState(false);
   const [aiError, setAiError] = React.useState('');
+  const [aiPreview, setAiPreview] = React.useState<TailorResult | null>(null);
+  // Toast for applied AI edits / profile syncs; carries an optional undo snapshot.
+  const [toast, setToast] = React.useState<{ message: string; undo?: { sections: ResumeSection[]; aiCoverLetter?: string } } | null>(null);
 
   const active = versions.find(v => v.id === activeId) ?? null;
 
@@ -259,6 +429,7 @@ export default function ResumeBuilderPage() {
         const updated = await resumeVersionApi.update(activeId, {
           title: patch.title,
           isFavorite: patch.isFavorite,
+          isAiTailored: patch.isAiTailored,
           contact: patch.contact,
           sections: patch.sections,
           customization: patch.customization,
@@ -311,32 +482,26 @@ export default function ResumeBuilderPage() {
   };
 
   // ─── AI tailor ─────────────────────────────────────────────────────────────
+  // Step 1: ask the AI for edit operations (a preview) — nothing is applied yet.
   const handleAiTailor = async () => {
     if (!active) return;
     setAiLoading(true);
     setAiError('');
     try {
-      const app = applications.find(a => a.id === aiAppId);
-      const result = await resumeService.generate({
-        job_description: aiJobDesc,
-        generation_type: aiGenType,
-        preferred_provider: undefined,
-        application_id: aiAppId || undefined,
-      });
-
-      // Create a new version with AI-tailored sections
-      const init = initVersionFromProfile(profile!, user?.name || '', user?.email || '');
-      const newVer = await resumeVersionApi.create({
-        ...init,
-        title: app?.position ? `${app.position} (AI)` : 'AI Tailored',
-        isAiTailored: true,
-        aiCoverLetter: result.cover_letter_content || undefined,
-        applicationId: aiAppId || undefined,
-        applicationLabel: app ? `${app.position} @ ${app.company}` : undefined,
+      const result = await resumeService.tailor({
+        instruction: aiInstruction.trim() || undefined,
+        job_description: aiJobDesc.trim() || undefined,
         sections: active.sections,
+        want_resume: aiGenType !== 'cover_letter',
+        want_cover_letter: aiGenType !== 'resume',
       });
-      setVersions(prev => [newVer, ...prev]);
-      setActiveId(newVer.id);
+      // If the AI proposed nothing, keep the dialog open with a message.
+      if (!(result.operations?.length) && !result.cover_letter) {
+        setAiError('The AI didn’t suggest any changes. Try rephrasing your instruction.');
+        return;
+      }
+      // Otherwise close the input dialog and review the diff on the canvas.
+      setAiPreview(result);
       setAiOpen(false);
     } catch (e: unknown) {
       setAiError((e as Error)?.message || 'Generation failed');
@@ -344,6 +509,61 @@ export default function ResumeBuilderPage() {
       setAiLoading(false);
     }
   };
+
+  // Step 2: apply the previewed operations to the current resume, with Undo.
+  const applyAiPreview = () => {
+    if (!active || !aiPreview) return;
+    const snapshot = active.sections;
+    const prevCover = active.aiCoverLetter;
+    const { sections, warnings } = applyResumeOperations(active.sections, aiPreview.operations);
+
+    updateActive({
+      sections,
+      isAiTailored: true,
+      ...(aiPreview.cover_letter ? { aiCoverLetter: aiPreview.cover_letter } : {}),
+    });
+
+    const changed = aiPreview.operations.length;
+    const parts: string[] = [];
+    if (changed) parts.push(`Applied ${changed} change${changed === 1 ? '' : 's'}`);
+    if (aiPreview.cover_letter) parts.push('cover letter attached');
+    if (warnings.length) parts.push(`${warnings.length} skipped`);
+    setToast({ message: parts.join(' · ') || 'No changes to apply', undo: { sections: snapshot, aiCoverLetter: prevCover } });
+
+    setAiPreview(null);
+  };
+
+  // Pull items added to the profile (e.g. new projects) into the active version.
+  const syncFromProfile = () => {
+    if (!active || !profile) return;
+    const snapshot = active.sections;
+    const { sections, added } = mergeProfileIntoSections(active.sections, profile);
+    if (added === 0) {
+      setToast({ message: 'Resume is already up to date with your profile' });
+      return;
+    }
+    updateActive({ sections });
+    setToast({
+      message: `Added ${added} item${added === 1 ? '' : 's'} from your profile`,
+      undo: { sections: snapshot, aiCoverLetter: active.aiCoverLetter },
+    });
+  };
+
+  const handleToastUndo = () => {
+    if (toast?.undo) updateActive({ sections: toast.undo.sections, aiCoverLetter: toast.undo.aiCoverLetter });
+    setToast(null);
+  };
+
+  const closeAiDialog = () => {
+    setAiOpen(false);
+    setAiError('');
+  };
+
+  // Annotated sections for the on-canvas AI diff review.
+  const aiDiffSections = React.useMemo(
+    () => (aiPreview && active ? annotateResumeDiff(active.sections, aiPreview.operations) : null),
+    [aiPreview, active],
+  );
 
   // ─── Section helpers ───────────────────────────────────────────────────────
   const patchSection = (sectionId: string, patch: Partial<ResumeSection>) => {
@@ -359,6 +579,24 @@ export default function ResumeBuilderPage() {
       visible: true, order: active.sections.length, items: [],
     };
     updateActive({ sections: [...active.sections, newSection] });
+  };
+
+  // ─── Drag-to-reorder sections ──────────────────────────────────────────────
+  const dragSectionId = React.useRef<string | null>(null);
+  const reorderSections = (draggedId: string, targetId: string) => {
+    if (!active || draggedId === targetId) return;
+    const ordered = [...active.sections].sort((a, b) => a.order - b.order);
+    const from = ordered.findIndex(s => s.id === draggedId);
+    const to = ordered.findIndex(s => s.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    updateActive({ sections: ordered.map((s, i) => ({ ...s, order: i })) });
+  };
+  const onSectionDragStart = (id: string) => { dragSectionId.current = id; };
+  const onSectionDrop = (id: string) => {
+    if (dragSectionId.current) reorderSections(dragSectionId.current, id);
+    dragSectionId.current = null;
   };
 
   // ─── Customize helpers ─────────────────────────────────────────────────────
@@ -427,6 +665,14 @@ export default function ResumeBuilderPage() {
 
             {saving && <CircularProgress size={14} sx={{ mr: 1 }} />}
 
+            {/* Sync from profile */}
+            <Tooltip title="Pull items from My Profile that aren't in this resume yet (e.g. newly added projects)">
+              <Button size="small" startIcon={<SyncIcon />} onClick={syncFromProfile}
+                sx={{ textTransform: 'none' }}>
+                Sync
+              </Button>
+            </Tooltip>
+
             {/* AI Tailor */}
             <Button size="small" startIcon={<AutoAwesomeIcon />} onClick={() => setAiOpen(true)}
               sx={{ textTransform: 'none' }}>
@@ -451,10 +697,43 @@ export default function ResumeBuilderPage() {
         {error && <Alert severity="error" onClose={() => setError('')} sx={{ mx: 2, mt: 1 }}>{error}</Alert>}
 
         {/* ─── RESUME PREVIEW ─────────────────────────────────────────────── */}
-        <Box sx={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 4, px: 2, ...thinScroll }}>
-          <Box sx={{ boxShadow: '0 4px 32px rgba(0,0,0,0.13)', borderRadius: 1, flexShrink: 0 }}>
+        <Box sx={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2, px: 2, ...thinScroll }}>
+          {/* AI change review bar (shown on the canvas instead of a modal) */}
+          {aiPreview && (
+            <Paper elevation={4} sx={{ position: 'sticky', top: 0, zIndex: 5, width: '100%', maxWidth: 900, mb: 2, p: 1.5, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <AutoAwesomeIcon color="secondary" fontSize="small" />
+              <Box sx={{ flex: 1, minWidth: 220 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>Review AI changes</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {aiPreview.summary || `${aiPreview.operations.length} change(s) proposed`}
+                  {aiPreview.cover_letter && ' · cover letter ready'}
+                </Typography>
+              </Box>
+              <Stack direction="row" sx={{ gap: 1.25, alignItems: 'center' }}>
+                {([['#10b981', 'Added'], ['#ef4444', 'Removed'], ['#f59e0b', 'Edited']] as [string, string][]).map(([col, lbl]) => (
+                  <Stack key={lbl} direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+                    <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: col }} />
+                    <Typography variant="caption" color="text.secondary">{lbl}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+              <Button size="small" onClick={() => setAiPreview(null)}>Discard</Button>
+              <Button size="small" variant="contained" startIcon={<CheckIcon />} onClick={applyAiPreview}>
+                Apply changes
+              </Button>
+            </Paper>
+          )}
+
+          {/* Normal preview (kept mounted for PDF export ref, hidden while reviewing) */}
+          <Box sx={{ boxShadow: '0 4px 32px rgba(0,0,0,0.13)', borderRadius: 1, flexShrink: 0, mb: 4, display: aiPreview ? 'none' : 'block' }}>
             <ResumeTemplate ref={resumeRef} version={active} />
           </Box>
+          {/* On-canvas diff while reviewing AI changes */}
+          {aiPreview && aiDiffSections && (
+            <Box sx={{ boxShadow: '0 4px 32px rgba(0,0,0,0.13)', borderRadius: 1, flexShrink: 0, mb: 4 }}>
+              <ResumeDiffPreview version={active} sections={aiDiffSections} />
+            </Box>
+          )}
         </Box>
       </Box>
 
@@ -462,7 +741,7 @@ export default function ResumeBuilderPage() {
           VERSIONS DIALOG
       ═══════════════════════════════════════════════════════════════════════ */}
       <Dialog open={versionsOpen} onClose={() => setVersionsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="h6">Resume Versions</Typography>
           <IconButton onClick={() => setVersionsOpen(false)} size="small"><CloseIcon /></IconButton>
         </DialogTitle>
@@ -476,9 +755,8 @@ export default function ResumeBuilderPage() {
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>{v.title}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {new Date(v.createdAt).toLocaleDateString()}
-                    {v.isAiTailored && ' · AI tailored'}
-                    {v.applicationLabel && ` · ${v.applicationLabel}`}
+                    {[formatDate(v.createdAt), v.isAiTailored ? 'AI tailored' : '', v.applicationLabel || '']
+                      .filter(Boolean).join(' · ') || 'Draft'}
                   </Typography>
                 </Box>
                 <Tooltip title={v.isFavorite ? 'Unfavorite' : 'Favorite'}>
@@ -612,7 +890,8 @@ export default function ResumeBuilderPage() {
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
               {[...active.sections].sort((a, b) => a.order - b.order).map(section => (
-                <SectionEditor key={section.id} section={section} patchSection={patchSection} />
+                <SectionEditor key={section.id} section={section} patchSection={patchSection}
+                  onSectionDragStart={onSectionDragStart} onSectionDrop={onSectionDrop} />
               ))}
               <Box sx={{ p: 2 }}>
                 <Button fullWidth size="small" startIcon={<AddIcon />} variant="outlined" onClick={addCustomSection}>
@@ -627,34 +906,46 @@ export default function ResumeBuilderPage() {
       {/* ═══════════════════════════════════════════════════════════════════════
           AI TAILOR DIALOG
       ═══════════════════════════════════════════════════════════════════════ */}
-      <Dialog open={aiOpen} onClose={() => setAiOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Dialog open={aiOpen} onClose={closeAiDialog} maxWidth="sm" fullWidth>
+        <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
             <AutoAwesomeIcon color="secondary" fontSize="small" />
             <Typography variant="h6">AI Tailor Resume</Typography>
           </Stack>
-          <IconButton onClick={() => setAiOpen(false)} size="small"><CloseIcon /></IconButton>
+          <IconButton onClick={closeAiDialog} size="small"><CloseIcon /></IconButton>
         </DialogTitle>
         <DialogContent>
           {aiError && <Alert severity="error" sx={{ mb: 2 }}>{aiError}</Alert>}
-
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Describe the edits you want, paste a job description, or both. You&apos;ll review every change highlighted on the resume before anything is applied.
+          </Typography>
           <TextField
-            fullWidth multiline rows={8} label="Job Description" placeholder="Paste the full job description here..."
+            fullWidth multiline rows={3} label="Instruction (optional)"
+            placeholder="e.g. remove my 2 weakest projects and add Prism and Nimbus; make the summary punchier"
+            value={aiInstruction} onChange={e => setAiInstruction(e.target.value)} sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth multiline rows={6} label="Job Description (optional)"
+            placeholder="Paste a job description to tailor against..."
             value={aiJobDesc} onChange={e => setAiJobDesc(e.target.value)} sx={{ mb: 2 }}
           />
-
           <FormControl fullWidth size="small" sx={{ mb: 2 }}>
             <InputLabel>Generate</InputLabel>
             <Select label="Generate" value={aiGenType} onChange={e => setAiGenType(e.target.value as typeof aiGenType)}>
+              <MenuItem value="resume">Resume changes only</MenuItem>
               <MenuItem value="both">Resume + Cover Letter</MenuItem>
-              <MenuItem value="resume">Resume only</MenuItem>
               <MenuItem value="cover_letter">Cover Letter only</MenuItem>
             </Select>
           </FormControl>
-
           <FormControl fullWidth size="small">
             <InputLabel>Link to Application (optional)</InputLabel>
-            <Select label="Link to Application (optional)" value={aiAppId} onChange={e => setAiAppId(e.target.value)}>
+            <Select label="Link to Application (optional)" value={aiAppId}
+              onChange={e => {
+                const id = e.target.value;
+                setAiAppId(id);
+                const app = applications.find(a => a.id === id);
+                if (app?.job_description) setAiJobDesc(app.job_description);
+              }}>
               <MenuItem value="">None</MenuItem>
               {applications.map(a => (
                 <MenuItem key={a.id} value={a.id}>{a.position} @ {a.company}</MenuItem>
@@ -663,13 +954,23 @@ export default function ResumeBuilderPage() {
           </FormControl>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAiOpen(false)}>Cancel</Button>
+          <Button onClick={closeAiDialog}>Cancel</Button>
           <Button variant="contained" startIcon={aiLoading ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
-            onClick={handleAiTailor} disabled={!aiJobDesc.trim() || aiLoading}>
-            {aiLoading ? 'Generating...' : 'Generate'}
+            onClick={handleAiTailor} disabled={aiLoading || (!aiInstruction.trim() && !aiJobDesc.trim())}>
+            {aiLoading ? 'Thinking...' : 'Generate'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Toast for applied AI edits / profile syncs (with optional Undo) */}
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={8000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        message={toast?.message}
+        action={toast?.undo ? <Button color="secondary" size="small" onClick={handleToastUndo}>UNDO</Button> : undefined}
+      />
 
       {/* ═══════════════════════════════════════════════════════════════════════
           DOWNLOAD POPOVER
@@ -706,7 +1007,12 @@ export default function ResumeBuilderPage() {
 }
 
 // ─── Section Editor (inside Customize drawer) ────────────────────────────────
-function SectionEditor({ section, patchSection }: { section: ResumeSection; patchSection: (id: string, p: Partial<ResumeSection>) => void }) {
+function SectionEditor({ section, patchSection, onSectionDragStart, onSectionDrop }: {
+  section: ResumeSection;
+  patchSection: (id: string, p: Partial<ResumeSection>) => void;
+  onSectionDragStart: (id: string) => void;
+  onSectionDrop: (id: string) => void;
+}) {
   const updateItem = (itemId: string, patch: Record<string, unknown>) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anySection = section as any;
@@ -718,10 +1024,52 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
     patchSection(section.id, { items } as Partial<ResumeSection>);
   };
 
+  // Remove an item card entirely (projects / experience / education / certifications).
+  const removeItem = (itemId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anySection = section as any;
+    if (!anySection.items) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    patchSection(section.id, { items: anySection.items.filter((it: any) => it.id !== itemId) } as Partial<ResumeSection>);
+  };
+
+  // Native drag-to-reorder for items within this section.
+  const dragItemId = React.useRef<string | null>(null);
+  const reorderItems = (draggedId: string, targetId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = (section as any).items as any[] | undefined;
+    if (!items || draggedId === targetId) return;
+    const from = items.findIndex(it => it.id === draggedId);
+    const to = items.findIndex(it => it.id === targetId);
+    if (from < 0 || to < 0) return;
+    const copy = [...items];
+    const [moved] = copy.splice(from, 1);
+    copy.splice(to, 0, moved);
+    patchSection(section.id, { items: copy } as Partial<ResumeSection>);
+  };
+  const itemHandle = (itemId: string) => (
+    <Box component="span" draggable
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', itemId); dragItemId.current = itemId; }}
+      sx={{ cursor: 'grab', display: 'inline-flex', color: 'text.disabled' }}>
+      <DragIndicatorIcon fontSize="small" />
+    </Box>
+  );
+  const itemDrop = (itemId: string) => ({
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: () => { if (dragItemId.current) reorderItems(dragItemId.current, itemId); dragItemId.current = null; },
+  });
+
   return (
+    <Box onDragOver={e => e.preventDefault()} onDrop={() => onSectionDrop(section.id)}>
     <Accordion disableGutters sx={{ boxShadow: 'none', borderBottom: '1px solid', borderColor: 'divider', '&:before': { display: 'none' } }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, px: 2 }}>
         <Stack direction="row" sx={{ alignItems: 'center', flex: 1, gap: 1, mr: 1 }}>
+          <Box component="span" draggable
+            onClick={e => e.stopPropagation()}
+            onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', section.id); onSectionDragStart(section.id); }}
+            sx={{ cursor: 'grab', display: 'inline-flex', color: 'text.disabled' }}>
+            <DragIndicatorIcon fontSize="small" />
+          </Box>
           <Switch size="small" checked={section.visible}
             onChange={e => { e.stopPropagation(); patchSection(section.id, { visible: e.target.checked }); }}
             onClick={e => e.stopPropagation()} />
@@ -733,10 +1081,16 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         <TextField fullWidth size="small" label="Section label" value={section.label} sx={{ mb: 1.5 }}
           onChange={e => patchSection(section.id, { label: e.target.value })} />
 
-        {/* Summary: single textarea */}
+        {/* Summary: single textarea with AI coach */}
         {section.type === 'summary' && (
-          <TextField fullWidth multiline rows={4} size="small" label="Summary" value={(section as ResumeSummarySection).content}
-            onChange={e => patchSection(section.id, { content: e.target.value } as Partial<ResumeSummarySection>)} />
+          <AiBulletField
+            multiline
+            rows={4}
+            placeholder="Professional summary"
+            context="Professional summary / headline for the top of the resume"
+            value={(section as ResumeSummarySection).content}
+            onChange={v => patchSection(section.id, { content: v } as Partial<ResumeSummarySection>)}
+          />
         )}
 
         {/* Skills / Languages: list of simple items */}
@@ -764,10 +1118,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         {section.type === 'work_experience' && (
           <Box>
             {(section as ResumeWorkSection).items.map(exp => (
-              <Box key={exp.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
+              <Box key={exp.id} {...itemDrop(exp.id)} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
                 <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
+                  {itemHandle(exp.id)}
                   <Switch size="small" checked={exp.visible} onChange={e => updateItem(exp.id, { visible: e.target.checked })} />
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>{exp.company || 'Work item'}</Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title="Remove"><IconButton size="small" onClick={() => removeItem(exp.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                 </Stack>
                 {([['company', 'Company'], ['title', 'Title'], ['location', 'Location'], ['startDate', 'Start Date'], ['endDate', 'End Date']] as [string, string][]).map(([k, lbl]) => (
                   <TextField key={k} size="small" fullWidth label={lbl} sx={{ mb: 0.5 }}
@@ -781,9 +1138,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
                     <Switch size="small" checked={h.visible} onChange={e => updateItem(exp.id, {
                       highlights: exp.highlights.map((hh, hhi) => hhi === hi ? { ...hh, visible: e.target.checked } : hh)
                     })} />
-                    <TextField size="small" fullWidth value={h.text} onChange={e => updateItem(exp.id, {
-                      highlights: exp.highlights.map((hh, hhi) => hhi === hi ? { ...hh, text: e.target.value } : hh)
-                    })} />
+                    <AiBulletField
+                      value={h.text}
+                      context={`${exp.title || ''} at ${exp.company || ''}`.trim()}
+                      onChange={v => updateItem(exp.id, {
+                        highlights: exp.highlights.map((hh, hhi) => hhi === hi ? { ...hh, text: v } : hh)
+                      })}
+                    />
                     <IconButton size="small" onClick={() => updateItem(exp.id, { highlights: exp.highlights.filter((_, hhi) => hhi !== hi) })}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -805,10 +1166,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         {section.type === 'education' && (
           <Box>
             {(section as ResumeEducationSection).items.map(edu => (
-              <Box key={edu.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
+              <Box key={edu.id} {...itemDrop(edu.id)} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
                 <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
+                  {itemHandle(edu.id)}
                   <Switch size="small" checked={edu.visible} onChange={e => updateItem(edu.id, { visible: e.target.checked })} />
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>{edu.institution || 'Education item'}</Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title="Remove"><IconButton size="small" onClick={() => removeItem(edu.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                 </Stack>
                 {([['institution', 'Institution'], ['degree', 'Degree'], ['fieldOfStudy', 'Field of Study'], ['startDate', 'Start Date'], ['endDate', 'End Date'], ['gpa', 'GPA']] as [string, string][]).map(([k, lbl]) => (
                   <TextField key={k} size="small" fullWidth label={lbl} sx={{ mb: 0.5 }}
@@ -827,10 +1191,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         {section.type === 'projects' && (
           <Box>
             {(section as ResumeProjectsSection).items.map(proj => (
-              <Box key={proj.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
+              <Box key={proj.id} {...itemDrop(proj.id)} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
                 <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
+                  {itemHandle(proj.id)}
                   <Switch size="small" checked={proj.visible} onChange={e => updateItem(proj.id, { visible: e.target.checked })} />
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>{proj.name || 'Project'}</Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title="Remove"><IconButton size="small" onClick={() => removeItem(proj.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                 </Stack>
                 {([['name', 'Project Name'], ['technologies', 'Technologies'], ['url', 'URL'], ['startDate', 'Start Date'], ['endDate', 'End Date']] as [string, string][]).map(([k, lbl]) => (
                   <TextField key={k} size="small" fullWidth label={lbl} sx={{ mb: 0.5 }}
@@ -844,9 +1211,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
                     <Switch size="small" checked={h.visible} onChange={e => updateItem(proj.id, {
                       highlights: proj.highlights.map((hh, hhi) => hhi === hi ? { ...hh, visible: e.target.checked } : hh)
                     })} />
-                    <TextField size="small" fullWidth value={h.text} onChange={e => updateItem(proj.id, {
-                      highlights: proj.highlights.map((hh, hhi) => hhi === hi ? { ...hh, text: e.target.value } : hh)
-                    })} />
+                    <AiBulletField
+                      value={h.text}
+                      context={`Project: ${proj.name || ''}`.trim()}
+                      onChange={v => updateItem(proj.id, {
+                        highlights: proj.highlights.map((hh, hhi) => hhi === hi ? { ...hh, text: v } : hh)
+                      })}
+                    />
                     <IconButton size="small" onClick={() => updateItem(proj.id, { highlights: proj.highlights.filter((_, hhi) => hhi !== hi) })}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -868,10 +1239,13 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         {section.type === 'certifications' && (
           <Box>
             {(section as ResumeCertificationsSection).items.map(cert => (
-              <Box key={cert.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
+              <Box key={cert.id} {...itemDrop(cert.id)} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5, mb: 1 }}>
                 <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
+                  {itemHandle(cert.id)}
                   <Switch size="small" checked={cert.visible} onChange={e => updateItem(cert.id, { visible: e.target.checked })} />
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>{cert.name || 'Certification'}</Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title="Remove"><IconButton size="small" onClick={() => removeItem(cert.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                 </Stack>
                 {([['name', 'Name'], ['issuer', 'Issuer'], ['date', 'Date'], ['url', 'URL']] as [string, string][]).map(([k, lbl]) => (
                   <TextField key={k} size="small" fullWidth label={lbl} sx={{ mb: 0.5 }}
@@ -924,5 +1298,6 @@ function SectionEditor({ section, patchSection }: { section: ResumeSection; patc
         )}
       </AccordionDetails>
     </Accordion>
+    </Box>
   );
 }

@@ -104,6 +104,14 @@ export default function BrowseJobsPage() {
     loadData();
   }, [loadData]);
 
+  // Live-refresh when the backend discovers new postings (dispatched from the
+  // dashboard layout's notification stream), so the feed updates without a reload.
+  React.useEffect(() => {
+    const onJobsUpdated = () => loadData();
+    window.addEventListener('prism:jobs-updated', onJobsUpdated);
+    return () => window.removeEventListener('prism:jobs-updated', onJobsUpdated);
+  }, [loadData]);
+
   // Handle Mark Read
   const handleMarkRead = async (jobId: string) => {
     try {

@@ -1,6 +1,10 @@
 from typing import List
 from fastapi import APIRouter, Depends, status
-from ..models.resume import ResumeGenerateRequest, GeneratedDocResponse, ResumeVersionCreate, ResumeVersionUpdate, ResumeVersionResponse
+from ..models.resume import (
+    ResumeGenerateRequest, GeneratedDocResponse, ResumeVersionCreate, ResumeVersionUpdate,
+    ResumeVersionResponse, BulletImproveRequest, BulletImproveResponse,
+    ResumeTailorRequest, ResumeTailorResponse,
+)
 from ..models.users import User
 from ..services.resume_service import ResumeService, VersionService
 from ..auth.dependencies import get_current_active_user
@@ -16,6 +20,33 @@ async def generate_resume(
     """Generate a tailored resume and/or cover letter from your profile + a job description."""
     doc = await ResumeService.generate(current_user.id, data)
     return doc
+
+
+@router.post("/tailor", response_model=ResumeTailorResponse)
+async def tailor_resume(
+    data: ResumeTailorRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Prompt-driven resume edit — returns only the affected fields as edit
+    operations (plus an optional cover letter), which the client applies."""
+    result = await ResumeService.tailor(current_user.id, data)
+    return ResumeTailorResponse(**result)
+
+
+@router.post("/improve-bullet", response_model=BulletImproveResponse)
+async def improve_bullet(
+    data: BulletImproveRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """AI-coach a single resume bullet/description into best-practice shape."""
+    result = await ResumeService.improve_bullet(
+        current_user.id,
+        text=data.text,
+        context=data.context,
+        job_description=data.job_description,
+        preferred_provider=data.preferred_provider,
+    )
+    return BulletImproveResponse(**result)
 
 
 @router.get("/history", response_model=List[GeneratedDocResponse])

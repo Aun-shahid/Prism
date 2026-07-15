@@ -1,3 +1,4 @@
+import asyncio
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -16,6 +17,10 @@ from ..database import (
 from ..models.scraper import ScrapedJob
 from ..models.general_sources import GeneralScraperSource
 from .logging_service import get_logger
+from .scraper_utils import normalize_job_url, is_excluded
+
+# Bounded concurrency for the per-posting LinkedIn applicant-count fetches.
+_APPLICANT_FETCH_CONCURRENCY = 5
 
 logger = get_logger("general_scraper_service")
 
@@ -94,51 +99,70 @@ class GeneralScraperService:
 
                     soup = BeautifulSoup(res.text, "html.parser")
                     cards = soup.select("li")
+
+                    # Phase 1: collect card metadata, skipping already-blacklisted URLs.
+                    card_infos = []
                     for card in cards:
                         title_elem = card.select_one(".base-search-card__title")
                         company_elem = card.select_one(".base-search-card__subtitle")
                         location_elem = card.select_one(".job-search-card__location")
                         link_elem = card.select_one(".base-card__full-link")
+                        if not (title_elem and link_elem):
+                            continue
+                        link = link_elem.get("href", "")
+                        if not link:
+                            continue
+                        if link in blacklisted_urls:
+                            logger.info(f"Skipping blacklisted job: {title_elem.get_text(strip=True)}")
+                            continue
+                        card_infos.append({
+                            "title": title_elem.get_text(strip=True),
+                            "company": company_elem.get_text(strip=True) if company_elem else "Company",
+                            "location": location_elem.get_text(strip=True) if location_elem else "Remote",
+                            "link": link,
+                        })
 
-                        if title_elem and link_elem:
-                            title = title_elem.get_text(strip=True)
-                            company = company_elem.get_text(strip=True) if company_elem else "Company"
-                            location = location_elem.get_text(strip=True) if location_elem else "Remote"
-                            link = link_elem.get("href", "")
+                    # Phase 2: fetch applicant counts concurrently (bounded) instead of
+                    # one blocking round-trip per card.
+                    sem = asyncio.Semaphore(_APPLICANT_FETCH_CONCURRENCY)
 
-                            # Skip blacklisted URLs
-                            if link in blacklisted_urls:
-                                logger.info(f"Skipping blacklisted job: {title}")
-                                continue
+                    async def _count(job_url: str):
+                        async with sem:
+                            return await GeneralScraperService._get_applicant_count(job_url, client)
 
-                            # Fetch detail page to check applicant count
-                            applicant_count = await GeneralScraperService._get_applicant_count(link, client)
+                    counts = await asyncio.gather(
+                        *[_count(ci["link"]) for ci in card_infos],
+                        return_exceptions=True,
+                    )
 
-                            if applicant_count is not None and applicant_count >= 100:
-                                # Add to blacklist so future runs skip it
-                                try:
-                                    await blacklist_col.update_one(
-                                        {"url": link},
-                                        {"$set": {
-                                            "url": link,
-                                            "title": title,
-                                            "company": company,
-                                            "reason": f"{applicant_count} applicants",
-                                            "blacklisted_at": datetime.utcnow()
-                                        }},
-                                        upsert=True
-                                    )
-                                except Exception as be:
-                                    logger.error(f"Failed to blacklist job: {be}")
-                                blacklisted_urls.add(link)
-                                logger.info(f"Blacklisted {title}: {applicant_count} applicants")
-                                continue
-
-                            jobs.append({
-                                "title": title,
-                                "url": link,
-                                "description_snippet": f"{company} | Location: {location}",
-                            })
+                    # Phase 3: apply the 100+ applicant filter and collect results.
+                    for info, applicant_count in zip(card_infos, counts):
+                        if isinstance(applicant_count, Exception):
+                            applicant_count = None
+                        link = info["link"]
+                        if applicant_count is not None and applicant_count >= 100:
+                            try:
+                                await blacklist_col.update_one(
+                                    {"url": link},
+                                    {"$set": {
+                                        "url": link,
+                                        "title": info["title"],
+                                        "company": info["company"],
+                                        "reason": f"{applicant_count} applicants",
+                                        "blacklisted_at": datetime.utcnow(),
+                                    }},
+                                    upsert=True,
+                                )
+                            except Exception as be:
+                                logger.error(f"Failed to blacklist job: {be}")
+                            blacklisted_urls.add(link)
+                            logger.info(f"Blacklisted {info['title']}: {applicant_count} applicants")
+                            continue
+                        jobs.append({
+                            "title": info["title"],
+                            "url": link,
+                            "description_snippet": f"{info['company']} | Location: {info['location']}",
+                        })
                 except Exception as e:
                     logger.error(f"Failed to crawl LinkedIn guest jobs for '{query}': {e}. Deactivating source.")
                     try:
@@ -309,6 +333,28 @@ class GeneralScraperService:
         return jobs
 
     @staticmethod
+    async def _fetch_source(source: GeneralScraperSource, keyword: str) -> List[dict]:
+        """Dispatch to the right fetcher for a source type. Returns [] for unknown types."""
+        if source.source_type == "preset_linkedin":
+            return await GeneralScraperService.fetch_linkedin_jobs(keyword, source.locations)
+        elif source.source_type == "preset_arbeitnow":
+            return await GeneralScraperService.fetch_arbeitnow_jobs(keyword, source.locations)
+        elif source.source_type == "rss":
+            return await GeneralScraperService.fetch_rss_jobs(source.url, keyword, source.locations, source.name)
+        return []
+
+    @staticmethod
+    async def _existing_dedup_keys(jobs_col, user_id: str) -> set:
+        """Fetch the set of normalized-URL keys already stored for a user (one query)."""
+        existing_keys = set()
+        async for doc in jobs_col.find({"user_id": user_id}, {"dedup_key": 1, "url": 1}):
+            if doc.get("dedup_key"):
+                existing_keys.add(doc["dedup_key"])
+            elif doc.get("url"):
+                existing_keys.add(normalize_job_url(doc["url"]))
+        return existing_keys
+
+    @staticmethod
     async def scrape_single_source_for_user(user_id: str, source_id: str) -> List[ScrapedJob]:
         """Scrape a single general source manually for a specific user."""
         sources_col = get_general_sources_collection()
@@ -326,38 +372,36 @@ class GeneralScraperService:
 
         source_doc["_id"] = str(source_doc["_id"])
         source = GeneralScraperSource(**source_doc)
-        
-        # Get user's search queries (job titles)
+
+        # Get user's search queries (job titles) and exclusions.
         profile = await profiles_col.find_one({"user_id": user_id})
         keywords = []
-        if profile and profile.get("job_titles"):
-            keywords = [t.strip() for t in profile["job_titles"] if t.strip()]
+        exclusions = []
+        if profile:
+            keywords = [t.strip() for t in profile.get("job_titles", []) if t.strip()]
+            exclusions = (profile.get("job_preferences") or {}).get("exclusions", []) or []
 
         if not keywords:
             keywords = ["Software Engineer", "Developer"]
 
-        discovered_jobs = []
+        target_id = f"general_{source.name.lower().replace(' ', '_')}"
         now = datetime.utcnow()
 
+        # One query for everything we've already stored for this user.
+        existing_keys = await GeneralScraperService._existing_dedup_keys(jobs_col, user_id)
+
+        new_docs = []
+        batch_keys = set()
         for keyword in keywords:
-            raw_jobs = []
-            if source.source_type == "preset_linkedin":
-                raw_jobs = await GeneralScraperService.fetch_linkedin_jobs(keyword, source.locations)
-            elif source.source_type == "preset_arbeitnow":
-                raw_jobs = await GeneralScraperService.fetch_arbeitnow_jobs(keyword, source.locations)
-            elif source.source_type == "rss":
-                raw_jobs = await GeneralScraperService.fetch_rss_jobs(source.url, keyword, source.locations, source.name)
-
-            for rj in raw_jobs:
-                existing = await jobs_col.find_one({
-                    "user_id": user_id,
-                    "url": rj["url"],
-                })
-                if existing:
+            for rj in await GeneralScraperService._fetch_source(source, keyword):
+                if is_excluded(exclusions, rj["title"], rj.get("description_snippet"), rj["url"]):
                     continue
-
-                job_doc = {
-                    "target_id": f"general_{source.name.lower().replace(' ', '_')}",
+                key = normalize_job_url(rj["url"])
+                if not key or key in existing_keys or key in batch_keys:
+                    continue
+                batch_keys.add(key)
+                new_docs.append({
+                    "target_id": target_id,
                     "user_id": user_id,
                     "title": rj["title"],
                     "url": rj["url"],
@@ -365,10 +409,18 @@ class GeneralScraperService:
                     "matched_keywords": [keyword.lower()],
                     "is_new": True,
                     "discovered_at": now,
-                }
-                result = await jobs_col.insert_one(job_doc)
-                job_doc["_id"] = str(result.inserted_id)
-                discovered_jobs.append(ScrapedJob(**job_doc))
+                    "first_seen": now,
+                    "last_seen": now,
+                    "dedup_key": key,
+                    "source": source.name,
+                })
+
+        discovered_jobs = []
+        if new_docs:
+            result = await jobs_col.insert_many(new_docs)
+            for job, inserted_id in zip(new_docs, result.inserted_ids):
+                job["_id"] = str(inserted_id)
+                discovered_jobs.append(ScrapedJob(**job))
 
         logger.info(f"Manual scrape of {source.name} complete: found {len(discovered_jobs)} new jobs for user {user_id}")
         return discovered_jobs
@@ -394,18 +446,19 @@ class GeneralScraperService:
             logger.info("No active general scraper sources found. Skipping sweep.")
             return
 
-        # Map profiles to gather keywords and user IDs
+        # Map profiles to gather keywords, exclusions and user IDs
         user_keywords_map = {}
+        user_exclusions_map = {}
         unique_keywords = set()
-        
+
         async for profile in profiles_col.find({}):
             user_id = profile["user_id"]
             titles = profile.get("job_titles", [])
             user_kws = [t.strip().lower() for t in titles if t.strip()]
             if user_kws:
                 user_keywords_map[user_id] = user_kws
-                for kw in user_kws:
-                    unique_keywords.add(kw)
+                user_exclusions_map[user_id] = (profile.get("job_preferences") or {}).get("exclusions", []) or []
+                unique_keywords.update(user_kws)
 
         if not unique_keywords:
             logger.info("No job titles configured in user profiles. Skipping sweep.")
@@ -414,44 +467,49 @@ class GeneralScraperService:
         logger.info(f"Starting general scrape sweep for {len(unique_keywords)} unique keywords across {len(user_keywords_map)} users...")
         now = datetime.utcnow()
 
-        # Fetch for each unique keyword
+        # Fetch each unique keyword ONCE (shared across all users searching it).
+        keyword_to_results = {}
         for keyword in unique_keywords:
-            # Query all active scraper sources for this keyword
-            keyword_results = []
+            results = []
             for source in active_sources:
-                raw_jobs = []
-                if source.source_type == "preset_linkedin":
-                    raw_jobs = await GeneralScraperService.fetch_linkedin_jobs(keyword, source.locations)
-                elif source.source_type == "preset_arbeitnow":
-                    raw_jobs = await GeneralScraperService.fetch_arbeitnow_jobs(keyword, source.locations)
-                elif source.source_type == "rss":
-                    raw_jobs = await GeneralScraperService.fetch_rss_jobs(source.url, keyword, source.locations, source.name)
-                
-                for rj in raw_jobs:
+                for rj in await GeneralScraperService._fetch_source(source, keyword):
                     rj["target_id"] = f"general_{source.name.lower().replace(' ', '_')}"
-                    keyword_results.append(rj)
+                    rj["source_name"] = source.name
+                    results.append(rj)
+            keyword_to_results[keyword] = results
 
-            # Propagate matching jobs to all users searching for this keyword
-            for user_id, user_kws in user_keywords_map.items():
-                if keyword in user_kws:
-                    for rj in keyword_results:
-                        existing = await jobs_col.find_one({
-                            "user_id": user_id,
-                            "url": rj["url"],
-                        })
-                        if existing:
-                            continue
+        # Assign to each user, applying that user's exclusions and de-duplicating
+        # against everything they already have (one query per user, then insert_many).
+        for user_id, user_kws in user_keywords_map.items():
+            exclusions = user_exclusions_map.get(user_id, [])
+            existing_keys = await GeneralScraperService._existing_dedup_keys(jobs_col, user_id)
 
-                        job_doc = {
-                            "target_id": rj["target_id"],
-                            "user_id": user_id,
-                            "title": rj["title"],
-                            "url": rj["url"],
-                            "description_snippet": rj["description_snippet"],
-                            "matched_keywords": [keyword],
-                            "is_new": True,
-                            "discovered_at": now,
-                        }
-                        await jobs_col.insert_one(job_doc)
+            new_docs = []
+            batch_keys = set()
+            for keyword in user_kws:
+                for rj in keyword_to_results.get(keyword, []):
+                    if is_excluded(exclusions, rj["title"], rj.get("description_snippet"), rj["url"]):
+                        continue
+                    key = normalize_job_url(rj["url"])
+                    if not key or key in existing_keys or key in batch_keys:
+                        continue
+                    batch_keys.add(key)
+                    new_docs.append({
+                        "target_id": rj["target_id"],
+                        "user_id": user_id,
+                        "title": rj["title"],
+                        "url": rj["url"],
+                        "description_snippet": rj["description_snippet"],
+                        "matched_keywords": [keyword],
+                        "is_new": True,
+                        "discovered_at": now,
+                        "first_seen": now,
+                        "last_seen": now,
+                        "dedup_key": key,
+                        "source": rj.get("source_name"),
+                    })
+
+            if new_docs:
+                await jobs_col.insert_many(new_docs)
 
         logger.info("General scrape sweep successfully completed.")

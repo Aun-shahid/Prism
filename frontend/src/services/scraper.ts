@@ -4,12 +4,28 @@ export interface ScraperTarget {
   id: string;
   user_id: string;
   company_name: string;
-  career_url: string;
+  career_url?: string | null;
   keywords: string[];
   is_active: boolean;
   last_scraped?: string;
+  // AI company research fields
+  website?: string | null;
+  jobs_url?: string | null;
+  description?: string | null;
+  industry?: string | null;
+  headquarters?: string | null;
+  company_size?: string | null;
+  talking_points?: string[];
+  research_status?: 'none' | 'pending' | 'completed' | 'failed';
+  researched_at?: string | null;
+  research_sources?: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface WatchCompanyPayload {
+  company_name: string;
+  keywords?: string[];
 }
 
 export interface ScrapedJob {
@@ -34,7 +50,7 @@ export interface PaginatedScrapedJobs {
 
 export interface ScraperTargetCreatePayload {
   company_name: string;
-  career_url: string;
+  career_url?: string;
   keywords: string[];
 }
 
@@ -78,6 +94,16 @@ export const scraperService = {
 
   async addTarget(payload: ScraperTargetCreatePayload): Promise<ScraperTarget> {
     const response = await api.post<ScraperTarget>('/scraper/targets', payload);
+    return response.data;
+  },
+
+  async watchCompany(payload: WatchCompanyPayload): Promise<ScraperTarget> {
+    const response = await api.post<ScraperTarget>('/scraper/targets/watch', payload);
+    return response.data;
+  },
+
+  async researchTarget(id: string): Promise<ScraperTarget> {
+    const response = await api.post<ScraperTarget>(`/scraper/targets/${id}/research`);
     return response.data;
   },
 

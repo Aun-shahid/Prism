@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/gmail/callback"
 
     # --- Scraper ---
-    SCRAPER_INTERVAL_HOURS: int = 12
+    # Base cadence for per-company target scrapes; general feeds run at 2x this.
+    SCRAPER_INTERVAL_HOURS: int = 4
 
     # --- CORS Allowed Origins ---
     ALLOWED_ORIGINS: str = "http://localhost:3000"

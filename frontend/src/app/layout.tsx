@@ -17,6 +17,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Prism - Job Application Assistant",
   description: "A premium personal assistant for tracking and applying to jobs",
+  icons: {
+    icon: "/prism_logo.png",
+    shortcut: "/prism_logo.png",
+    apple: "/prism_logo.png",
+  },
 };
 
 export default function RootLayout({

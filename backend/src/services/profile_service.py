@@ -22,6 +22,76 @@ from .logging_service import get_logger
 logger = get_logger("profile_service")
 
 
+def format_profile_for_prompt(profile: UserProfile) -> str:
+    """Convert a UserProfile into a readable text block for LLM prompts.
+
+    Shared by resume tailoring and the AI assistant so both see the same
+    full-profile view — every project, role, and education entry, plus
+    contact details and target roles.
+    """
+    sections: list[str] = []
+
+    if profile.headline:
+        sections.append(f"**Headline:** {profile.headline}")
+    if profile.summary:
+        sections.append(f"**Summary:** {profile.summary}")
+    if profile.location:
+        sections.append(f"**Location:** {profile.location}")
+    if profile.job_titles:
+        sections.append(f"**Target Roles:** {', '.join(profile.job_titles)}")
+
+    if profile.skills:
+        sections.append(f"**Skills:** {', '.join(profile.skills)}")
+
+    if profile.work_experience:
+        sections.append("**Work Experience:**")
+        for exp in profile.work_experience:
+            end = exp.end_date or "Present"
+            sections.append(f"- {exp.title} at {exp.company} ({exp.start_date} – {end})")
+            if exp.description:
+                sections.append(f"  {exp.description}")
+            for h in exp.highlights:
+                sections.append(f"  • {h}")
+
+    if profile.projects:
+        sections.append("**Projects:**")
+        for proj in profile.projects:
+            techs = f" [{', '.join(proj.technologies)}]" if proj.technologies else ""
+            sections.append(f"- {proj.name}{techs}")
+            if proj.description:
+                sections.append(f"  {proj.description}")
+            if proj.url:
+                sections.append(f"  {proj.url}")
+
+    if profile.education:
+        sections.append("**Education:**")
+        for edu in profile.education:
+            end = edu.end_date or "Present"
+            sections.append(
+                f"- {edu.degree} in {edu.field_of_study or 'N/A'} at {edu.institution} "
+                f"({edu.start_date or '?'} – {end})"
+            )
+
+    if profile.certifications:
+        sections.append("**Certifications:**")
+        for cert in profile.certifications:
+            sections.append(f"- {cert.name} by {cert.issuer}")
+
+    if profile.languages:
+        sections.append(f"**Languages:** {', '.join(profile.languages)}")
+
+    if profile.phone:
+        sections.append(f"**Phone:** {profile.phone}")
+    if profile.linkedin_url:
+        sections.append(f"**LinkedIn:** {profile.linkedin_url}")
+    if profile.github_url:
+        sections.append(f"**GitHub:** {profile.github_url}")
+    if profile.portfolio_url:
+        sections.append(f"**Portfolio:** {profile.portfolio_url}")
+
+    return "\n".join(sections) if sections else "No profile data available."
+
+
 class ProfileService:
     @staticmethod
     async def get_or_create_profile(user_id: str) -> UserProfile:
@@ -50,7 +120,7 @@ class ProfileService:
             "projects": [],
             "certifications": [],
             "languages": [],
-            "job_preferences": {"onsite": [], "remote": [], "hybrid": []},
+            "job_preferences": {"onsite": [], "remote": [], "hybrid": [], "exclusions": []},
             "created_at": now,
             "updated_at": now,
         }

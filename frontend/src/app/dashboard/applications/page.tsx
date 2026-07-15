@@ -619,7 +619,7 @@ export default function ApplicationsPage() {
       <Dialog open={openDetailDialog} onClose={handleCloseDetailDialog} fullWidth maxWidth="md">
         {selectedApp && (
           <>
-            <DialogTitle sx={{ fontWeight: 800, pb: 1 }}>
+            <DialogTitle component="div" sx={{ fontWeight: 800, pb: 1 }}>
               <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
                   <Typography variant="h5" sx={{ fontWeight: 800 }}>{selectedApp.company}</Typography>

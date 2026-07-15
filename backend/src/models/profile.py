@@ -43,6 +43,7 @@ class JobPreferences(BaseModel):
     onsite: List[str] = []
     remote: List[str] = []
     hybrid: List[str] = []
+    exclusions: List[str] = []  # companies/keywords/locations to exclude from matches
 
 
 class UserProfile(BaseModel):

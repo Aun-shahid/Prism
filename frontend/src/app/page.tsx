@@ -54,21 +54,12 @@ export default function LandingPage() {
         <Container maxWidth="lg">
           <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 0, sm: 2 } }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box 
-                sx={{ 
-                  width: 32, 
-                  height: 32, 
-                  borderRadius: 1, 
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 'bold',
-                  color: '#fff'
-                }}
-              >
-                P
-              </Box>
+              <Box
+                component="img"
+                src="/prism_logo.png"
+                alt="Prism"
+                sx={{ width: 34, height: 34, objectFit: 'contain', display: 'block' }}
+              />
               <Typography variant="h6" component="div" sx={{ fontWeight: 800, trackingWidth: -0.5 }}>
                 Prism
               </Typography>
@@ -98,13 +89,26 @@ export default function LandingPage() {
       <Container maxWidth="lg" sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', py: { xs: 8, md: 12 } }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '7fr 5fr' }, gap: 6, alignItems: 'center', width: '100%' }}>
           <Box>
-            <Typography 
-              component="span" 
-              variant="subtitle1" 
-              sx={{ 
-                color: 'secondary.main', 
-                fontWeight: 700, 
-                textTransform: 'uppercase', 
+            <Box
+              component="img"
+              src="/logo.png"
+              alt="Prism"
+              sx={{
+                width: { xs: 260, md: 400 },
+                height: 'auto',
+                display: 'block',
+                mb: 1,
+                ml: { xs: -2, md: -3 },
+                filter: 'drop-shadow(0 8px 40px rgba(124, 58, 237, 0.25))',
+              }}
+            />
+            <Typography
+              component="span"
+              variant="subtitle1"
+              sx={{
+                color: 'secondary.main',
+                fontWeight: 700,
+                textTransform: 'uppercase',
                 letterSpacing: 1.5,
                 mb: 2,
                 display: 'inline-block'

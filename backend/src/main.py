@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import get_database, client
-from .routers import auth, users, api_keys, profile, applications, resume, scraper, gmail, jobs, notifications
+from .routers import auth, users, api_keys, profile, applications, resume, scraper, gmail, jobs, notifications, assistant
 from .services.logging_service import get_logger
 from .services.scheduler import run_background_scheduler
 from .config import settings
@@ -60,6 +60,7 @@ app.include_router(scraper.router)
 app.include_router(gmail.router)
 app.include_router(jobs.router)
 app.include_router(notifications.router)
+app.include_router(assistant.router)
 
 
 @app.get("/")

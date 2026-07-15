@@ -41,6 +41,7 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import PeopleIcon from '@mui/icons-material/People';
 import LanguageIcon from '@mui/icons-material/Language';
 import SearchIcon from '@mui/icons-material/Search';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -515,21 +516,32 @@ export default function DashboardPage() {
               }} 
             />
             <CardContent sx={{ p: 4, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
-              <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>
-                Setup API Keys to Tailor Resumes
-              </Typography>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
+                <AutoAwesomeIcon sx={{ color: '#a78bfa' }} />
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                  Meet your AI career assistant
+                </Typography>
+              </Stack>
               <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-                Prism uses your own AI providers (OpenAI, Gemini, Claude) directly so you don't pay subscription fees. Add your keys in Settings to unlock automated resume tailoring and cover letter builders.
+                It knows your experience and projects, researches companies live, and drafts tailored emails and cover letters on request. Add your own AI key (OpenAI, Gemini or Claude) in Settings — no subscription fees.
               </Typography>
-              <Button 
-                variant="outlined" 
-                color="primary"
-                onClick={() => router.push('/dashboard/settings')}
-                endIcon={<ArrowForwardIcon />}
-                sx={{ alignSelf: 'flex-start' }}
-              >
-                Go to Settings
-              </Button>
+              <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  onClick={() => router.push('/dashboard/assistant')}
+                  endIcon={<ArrowForwardIcon />}
+                  sx={{ background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)', boxShadow: '0 4px 12px rgba(124,58,237,0.3)' }}
+                >
+                  Open Assistant
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  onClick={() => router.push('/dashboard/settings')}
+                >
+                  Add API Key
+                </Button>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>

@@ -42,6 +42,7 @@ import EmailIcon from '@mui/icons-material/Email';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LanguageIcon from '@mui/icons-material/Language';
 import NotificationsIcon from '@mui/icons-material/Notifications';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { notificationsService, Notification } from '../../services/notifications';
 
 const drawerWidth = 240;
@@ -85,6 +86,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setToastOpen(true);
           setNotifications(prev => [newNotif, ...prev.slice(0, 14)]);
           setUnreadCount(prev => prev + 1);
+          // Let any open job feed refresh itself when new postings are discovered,
+          // so users don't have to manually reload to see them.
+          if (newNotif.type === 'job_alert' && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('prism:jobs-updated'));
+          }
         },
         (err) => {
           console.error('SSE Notification stream error', err);
@@ -177,6 +183,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { text: 'Settings', icon: <SettingsIcon />, path: '/dashboard/settings' },
   ] : [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
+    { text: 'AI Assistant', icon: <AutoAwesomeIcon />, path: '/dashboard/assistant' },
     { text: 'Applications', icon: <WorkIcon />, path: '/dashboard/applications' },
     { text: 'My Profile', icon: <PersonIcon />, path: '/dashboard/profile' },
     { text: 'Resume Builder', icon: <DescriptionIcon />, path: '/dashboard/resume' },
@@ -190,22 +197,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Toolbar>
         <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-          <Box 
-            sx={{ 
-              width: 28, 
-              height: 28, 
-              borderRadius: 0.5, 
-              background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 'bold',
-              color: '#fff',
-              fontSize: '0.9rem'
-            }}
-          >
-            P
-          </Box>
+          <Box
+            component="img"
+            src="/prism_logo.png"
+            alt="Prism"
+            sx={{ width: 30, height: 30, objectFit: 'contain', display: 'block' }}
+          />
           <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
             Prism Board
           </Typography>
