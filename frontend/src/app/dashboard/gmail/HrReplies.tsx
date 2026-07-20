@@ -12,6 +12,8 @@ import ForumIcon from '@mui/icons-material/Forum';
 import { GmailStatus } from '../../../services/gmail';
 import { outreachService, InboundReply } from '../../../services/outreach';
 import { emailSettingsService } from '../../../services/emailSettings';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 
 interface Props {
   status: GmailStatus | null;
@@ -25,6 +27,7 @@ const CATEGORY_COLOR: Record<string, 'success' | 'info' | 'default' | 'warning'>
 };
 
 export default function HrReplies({ status }: Props) {
+  const { hasActiveKey } = useApiKeys();
   const [replies, setReplies] = React.useState<InboundReply[]>([]);
   const [enabled, setEnabled] = React.useState<boolean>(false);
   const [loading, setLoading] = React.useState(true);
@@ -110,9 +113,11 @@ export default function HrReplies({ status }: Props) {
             <ForumIcon color="primary" />
             <Typography variant="h6" sx={{ fontWeight: 700 }}>HR Replies</Typography>
           </Stack>
-          <Button size="small" startIcon={polling ? <CircularProgress size={14} /> : <RefreshIcon />} onClick={handlePoll} disabled={polling}>
-            Check now
-          </Button>
+          <NoApiKeyTooltip blocked={!hasActiveKey}>
+            <Button size="small" startIcon={polling ? <CircularProgress size={14} /> : <RefreshIcon />} onClick={handlePoll} disabled={polling || !hasActiveKey}>
+              Check now
+            </Button>
+          </NoApiKeyTooltip>
         </Stack>
 
         {!enabled && (

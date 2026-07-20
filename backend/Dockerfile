@@ -12,8 +12,11 @@ ENV PYTHONUNBUFFERED=1
 # Default port variable
 ENV PORT=8080
 
-# Install system dependencies (if any are needed, like git/curl, none needed here currently)
-# RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
+# chromium is required for the zendriver headless-browser scraping fallback
+# (JS-rendered career pages) — zendriver has no auto-download, it only
+# locates an existing system Chrome/Chromium binary at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file first to leverage Docker cache
 COPY requirements.txt .

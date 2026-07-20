@@ -15,6 +15,8 @@ import { emailSettingsService, EmailSettings } from '../../../services/emailSett
 import { resumeVersionApi, ResumeVersion } from '../../../services/resumeBuilder';
 import { elementToPdfBase64 } from '../../../services/resumeExport';
 import ResumeTemplate from '../resume/ResumeTemplate';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 
 interface Props {
   status: GmailStatus | null;
@@ -24,6 +26,7 @@ interface Props {
 const AUTO_SEND_SECONDS = 8;
 
 export default function ApplyByEmail({ status, onSent }: Props) {
+  const { hasActiveKey } = useApiKeys();
   const [settings, setSettings] = React.useState<EmailSettings | null>(null);
   const [versions, setVersions] = React.useState<ResumeVersion[]>([]);
 
@@ -196,12 +199,14 @@ export default function ApplyByEmail({ status, onSent }: Props) {
           <TextField label="Position (optional)" value={position} onChange={e => setPosition(e.target.value)} fullWidth size="small" />
         </Stack>
 
-        <Button
-          variant="contained" startIcon={composing ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
-          onClick={handleGenerate} disabled={composing || !jobDescription.trim()}
-        >
-          {composing ? 'Generating…' : 'Extract & Generate'}
-        </Button>
+        <NoApiKeyTooltip blocked={!hasActiveKey}>
+          <Button
+            variant="contained" startIcon={composing ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
+            onClick={handleGenerate} disabled={composing || !jobDescription.trim() || !hasActiveKey}
+          >
+            {composing ? 'Generating…' : 'Extract & Generate'}
+          </Button>
+        </NoApiKeyTooltip>
 
         {result && (
           <Paper variant="outlined" sx={{ p: 2, mt: 3 }}>

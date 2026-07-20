@@ -429,9 +429,18 @@ function JobCard({
     }}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
         <Box sx={{ maxWidth: '80%' }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{job.title}</Typography>
             {job.is_new && <Chip label="NEW" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800 }} />}
+            {job.years_experience_display && (
+              <Chip
+                label={job.years_experience_display}
+                size="small"
+                variant="outlined"
+                color="secondary"
+                sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
+              />
+            )}
           </Stack>
           <Typography variant="subtitle2" color="secondary.main" sx={{ fontWeight: 600 }}>{company}</Typography>
         </Box>

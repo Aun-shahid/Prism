@@ -219,7 +219,7 @@ class EmailOutreachService:
             + "Write the application email now."
         )
         text, provider = await AIService.generate_text(
-            user_id, system_prompt, user_prompt, preferred_provider=preferred_provider
+            user_id, system_prompt, user_prompt, preferred_provider=preferred_provider, purpose="tailor"
         )
 
         subject, body, note = _parse_email_output(text)
@@ -279,7 +279,7 @@ class EmailOutreachService:
         )
         user_prompt = f"CONVERSATION SO FAR:\n{conversation_text}\n\nWrite my reply."
         text, _provider = await AIService.generate_text(
-            user_id, system_prompt, user_prompt, preferred_provider=preferred_provider
+            user_id, system_prompt, user_prompt, preferred_provider=preferred_provider, purpose="tailor"
         )
         body = text.strip()
         if settings.signature and settings.signature.strip() not in body:

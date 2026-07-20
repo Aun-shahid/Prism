@@ -44,10 +44,12 @@ import LanguageIcon from '@mui/icons-material/Language';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { notificationsService, Notification } from '../../services/notifications';
+import { ApiKeysProvider } from '../../hooks/useApiKeys';
+import GoogleTranslate from '../../components/GoogleTranslate';
 
 const drawerWidth = 240;
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
   const theme = useTheme();
@@ -268,6 +270,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Typography>
 
           <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            {/* Language switcher (Google Translate widget) */}
+            <GoogleTranslate />
+
             {/* Notification Bell */}
             <IconButton color="inherit" onClick={handleNotifOpen}>
               <Badge badgeContent={unreadCount} color="error">
@@ -451,5 +456,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ) : undefined}
       </Snackbar>
     </Box>
+  );
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ApiKeysProvider>
+      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+    </ApiKeysProvider>
   );
 }

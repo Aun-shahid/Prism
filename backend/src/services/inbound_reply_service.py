@@ -120,7 +120,7 @@ class InboundReplyService:
 
         system = _CLASSIFY_SYSTEM.replace("{profile}", profile_text)
         result, _provider = await AIService.generate_json(
-            user_id, system, f"THREAD:\n{convo}\n\nClassify + draft the reply."
+            user_id, system, f"THREAD:\n{convo}\n\nClassify + draft the reply.", purpose="tailor"
         )
         category = (result.get("category") or "other").strip().lower()
         reply = (result.get("reply") or "").strip()

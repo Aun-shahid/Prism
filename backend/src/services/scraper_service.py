@@ -1,10 +1,13 @@
+import asyncio
 import re
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
 from fastapi import HTTPException, status
-import httpx
+from curl_cffi.requests.exceptions import RequestException
 from bs4 import BeautifulSoup
+
+from .stealth_http import new_session
 
 from ..database import (
     get_scraper_targets_collection,
@@ -25,17 +28,31 @@ from ..models.general_sources import (
     GeneralScraperSourceUpdateRequest,
 )
 from .logging_service import get_logger
-from .scraper_utils import normalize_job_url, is_excluded, looks_like_job_link
+from .scraper_utils import (
+    normalize_job_url, is_excluded, looks_like_job_link, keyword_matches,
+    extract_years_experience, extract_description_snippet,
+)
 from . import ats_service
+
+# Bounded live-fetch of individual job pages for descriptions (HTML-scraping
+# path only — ATS providers already include the description in their API
+# response). Concurrency-limited and capped per scrape so a company posting a
+# wave of new roles can't make one scrape run unboundedly long.
+_DESCRIPTION_FETCH_CONCURRENCY = 5
+_DESCRIPTION_FETCH_CAP = 25
+_DESCRIPTION_SNIPPET_CHARS = 600
+
+# A real headless browser is far heavier (memory/CPU, ~1-3s startup) than an
+# HTTP request — cap how many can run at once across ALL concurrent scrapes
+# (manual scans + the background scheduler sweep share this one limit), not
+# just per-call, so a sweep hitting several JS-rendered sites at once can't
+# spin up unbounded Chrome instances.
+_BROWSER_FALLBACK_SEMAPHORE = asyncio.Semaphore(2)
 
 logger = get_logger("scraper_service")
 
-# Browser headers to avoid scraper blocks
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+# HTTP fetches use stealth_http.new_session() (TLS/JA3 browser impersonation
+# via curl_cffi) instead of a hand-set User-Agent — see stealth_http.py.
 
 # Common job-listing HTML tag patterns
 JOB_LINK_PATTERNS = [
@@ -80,19 +97,23 @@ class ScraperService:
     @staticmethod
     async def watch_company(user_id: str, data: WatchCompanyRequest) -> ScraperTarget:
         """
-        Add a company to the watchlist by name only. Creates the target
-        immediately (research_status="pending") and runs AI web research in
-        the background to fill in the website, careers/jobs URLs and company
-        brief. The frontend polls the target list until research settles.
+        Add a company to the watchlist. Creates the target immediately
+        (research_status="pending") and runs AI web research in the
+        background to fill in the website, careers/jobs URLs and company
+        brief. If the caller already supplied `career_url`, research honors
+        it exactly instead of searching for/guessing one — cheaper and far
+        more reliable than letting the AI discover it. The frontend polls
+        the target list until research settles.
         """
         import asyncio
 
         collection = get_scraper_targets_collection()
         now = datetime.utcnow()
+        career_url = data.career_url.strip() if data.career_url and data.career_url.strip() else None
         doc = {
             "user_id": user_id,
             "company_name": data.company_name.strip(),
-            "career_url": None,
+            "career_url": career_url,
             "keywords": [kw.lower().strip() for kw in data.keywords],
             "is_active": True,
             "last_scraped": None,
@@ -106,7 +127,7 @@ class ScraperService:
 
         asyncio.create_task(
             ScraperService._research_target_task(
-                user_id, target_id, data.preferred_provider
+                user_id, target_id, data.preferred_provider, known_career_url=career_url
             )
         )
         logger.info(f"Watching company '{data.company_name}' for user {user_id} (research queued)")
@@ -133,15 +154,22 @@ class ScraperService:
         if not doc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
 
+        # If a careers URL is already trusted (user-set or previously discovered),
+        # re-research should still honor it rather than searching again from scratch.
         asyncio.create_task(
-            ScraperService._research_target_task(user_id, target_id, preferred_provider)
+            ScraperService._research_target_task(
+                user_id, target_id, preferred_provider, known_career_url=doc.get("career_url")
+            )
         )
         doc["_id"] = str(doc["_id"])
         return ScraperTarget(**doc)
 
     @staticmethod
     async def _research_target_task(
-        user_id: str, target_id: str, preferred_provider: Optional[str] = None
+        user_id: str,
+        target_id: str,
+        preferred_provider: Optional[str] = None,
+        known_career_url: Optional[str] = None,
     ) -> None:
         """Background task: research the company and persist the findings."""
         from .web_research_service import WebResearchService
@@ -155,7 +183,8 @@ class ScraperService:
 
         try:
             brief, sources = await WebResearchService.research_company(
-                user_id, company_name, preferred_provider=preferred_provider
+                user_id, company_name, preferred_provider=preferred_provider,
+                known_career_url=known_career_url,
             )
             update = {
                 "website": brief.get("website"),
@@ -254,26 +283,16 @@ class ScraperService:
         return True
 
     @staticmethod
-    async def _fetch_html_jobs(career_url: str) -> List[dict]:
-        """Fetch a career page and extract candidate posting links from raw HTML.
-
-        Returns a de-duplicated list of {title, url, location, source}. Applies a
-        noise filter so navigation / legal / social links don't pollute results.
+    def _extract_job_links(html: str, base_url: str, source: str = "html") -> List[dict]:
+        """Extract candidate posting links out of a page's HTML (shared by the
+        static fetch and the browser-rendered fallback). Returns a
+        de-duplicated list of {title, url, location, source, description}.
+        Applies a noise filter so navigation/legal/social links don't pollute
+        results.
         """
         from urllib.parse import urljoin
 
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-                response = await client.get(career_url, headers=HEADERS)
-                response.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch {career_url}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to fetch career page: {str(e)}",
-            )
-
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         found: dict = {}  # normalized_url -> {title, url}
 
         def _consider(text: str, href: str) -> None:
@@ -281,7 +300,7 @@ class ScraperService:
             if not text or not href:
                 return
             if href.startswith("/"):
-                href = urljoin(career_url, href)
+                href = urljoin(base_url, href)
             if not href.startswith("http"):
                 return
             if not looks_like_job_link(text, href):
@@ -304,9 +323,99 @@ class ScraperService:
                 _consider(link.get_text(strip=True), link["href"])
 
         return [
-            {"title": v["title"], "url": v["url"], "location": None, "source": "html"}
+            {"title": v["title"], "url": v["url"], "location": None, "source": source, "description": None}
             for v in found.values()
         ]
+
+    @staticmethod
+    async def _fetch_html_jobs(career_url: str) -> List[dict]:
+        """Fetch a career page and extract candidate posting links from raw HTML."""
+        try:
+            async with new_session(timeout=30.0) as client:
+                response = await client.get(career_url)
+                response.raise_for_status()
+        except RequestException as e:
+            logger.error(f"Failed to fetch {career_url}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to fetch career page: {str(e)}",
+            )
+
+        return ScraperService._extract_job_links(response.text, career_url, source="html")
+
+    @staticmethod
+    async def _fetch_html_jobs_with_browser(career_url: str) -> List[dict]:
+        """
+        Last-resort fallback for JS-rendered career pages: render the page in
+        a real headless browser and extract from the RENDERED DOM instead of
+        the raw HTML response. Only invoked when the static fetch above finds
+        zero candidates — a real browser is far heavier than a plain HTTP
+        request, so this must never become the default path.
+
+        Requires a system Chrome/Chromium/Brave install (zendriver locates an
+        existing browser; it does not bundle or download one). Degrades to an
+        empty list with a log warning if none is found or rendering fails, so
+        a scrape never hard-fails because of this.
+        """
+        try:
+            import zendriver
+            import logging as _logging
+            _logging.getLogger("zendriver").setLevel(_logging.WARNING)  # its INFO logs are verbose per-launch dumps
+        except ImportError:
+            logger.warning("zendriver not installed — skipping JS-render fallback")
+            return []
+
+        async with _BROWSER_FALLBACK_SEMAPHORE:
+            browser = None
+            try:
+                browser = await zendriver.start(headless=True)
+                page = await browser.get(career_url)
+                await page.sleep(2.5)  # let client-side rendering settle
+                html = await page.get_content()
+            except Exception as e:
+                logger.warning(f"Browser-rendering fallback failed for {career_url}: {e}")
+                return []
+            finally:
+                if browser is not None:
+                    try:
+                        await browser.stop()
+                    except Exception:
+                        pass
+
+        candidates = ScraperService._extract_job_links(html, career_url, source="html-js")
+        if candidates:
+            logger.info(f"Browser-rendering fallback recovered {len(candidates)} candidate(s) from {career_url}")
+        return candidates
+
+    @staticmethod
+    async def _fetch_missing_descriptions(candidates: List[dict]) -> None:
+        """Live-fetch a description for candidates that don't already have one
+        (i.e. HTML-scraped, not ATS-sourced), bounded by concurrency and a cap.
+        Mutates each candidate dict's "description" key in place.
+        """
+        from .web_research_service import WebResearchService
+
+        needing_fetch = [c for c in candidates if not c.get("description") and c.get("url")]
+        if not needing_fetch:
+            return
+        to_fetch = needing_fetch[:_DESCRIPTION_FETCH_CAP]
+        if len(needing_fetch) > _DESCRIPTION_FETCH_CAP:
+            logger.info(
+                f"Capping job-description fetch to {_DESCRIPTION_FETCH_CAP} of "
+                f"{len(needing_fetch)} new postings this run"
+            )
+
+        sem = asyncio.Semaphore(_DESCRIPTION_FETCH_CONCURRENCY)
+
+        async def _fetch_one(cand: dict) -> None:
+            async with sem:
+                try:
+                    text, _links = await WebResearchService.fetch_page(cand["url"], max_chars=4000)
+                    cand["description"] = text or None
+                except Exception as e:
+                    logger.warning(f"Failed to fetch description for {cand.get('url')}: {e}")
+
+        await asyncio.gather(*[_fetch_one(c) for c in to_fetch], return_exceptions=True)
 
     @staticmethod
     async def scrape_target(user_id: str, target_id: str) -> List[ScrapedJob]:
@@ -343,6 +452,8 @@ class ScraperService:
         now = datetime.utcnow()
 
         # 1. Gather raw candidates — structured ATS API first, HTML fallback.
+        # ATS responses already include a description; HTML candidates get
+        # theirs fetched later, but only for postings that turn out to be new.
         candidates: List[dict] = []
         ats = ats_service.detect_ats(scrape_url) or ats_service.detect_ats(target.career_url)
         if ats:
@@ -353,9 +464,16 @@ class ScraperService:
                     "url": j["url"],
                     "location": j.get("location"),
                     "source": provider,
+                    "description": j.get("description"),
                 })
         if not candidates:
             candidates = await ScraperService._fetch_html_jobs(scrape_url)
+        if not candidates:
+            # Zero links from the static fetch is the strongest signal that
+            # the page is JS-rendered (a real career page with genuinely no
+            # matches would still usually surface SOME candidate links before
+            # keyword filtering) — worth the heavier browser-render attempt.
+            candidates = await ScraperService._fetch_html_jobs_with_browser(scrape_url)
 
         # 2. Load the user's matching keywords + exclusions.
         profile_collection = get_profiles_collection()
@@ -378,12 +496,14 @@ class ScraperService:
             return []
 
         # 3. Filter by keyword + exclusions, de-dup within this batch by normalized URL.
-        prepared: dict = {}  # dedup_key -> job doc
+        # Description/years-of-experience are deferred until we know which
+        # candidates are actually new — no point fetching/parsing a posting
+        # we've already stored.
+        prepared: dict = {}  # dedup_key -> candidate info
         for cand in candidates:
             title = cand["title"]
             url = cand["url"]
-            title_lower = title.lower()
-            matched = [kw for kw in all_keywords if kw in title_lower] if all_keywords else []
+            matched = keyword_matches(title, all_keywords)
             if all_keywords and not matched:
                 continue
             if is_excluded(exclusions, title, target.company_name, cand.get("location"), url):
@@ -391,22 +511,14 @@ class ScraperService:
             key = normalize_job_url(url)
             if not key or key in prepared:
                 continue
-            loc = cand.get("location")
             prepared[key] = {
-                "target_id": target_id,
-                "user_id": user_id,
                 "title": title,
                 "url": url,
-                "description_snippet": f"{target.company_name} | {loc}" if loc else None,
-                "matched_keywords": matched,
-                "is_new": True,
-                "discovered_at": now,
-                "first_seen": now,
-                "last_seen": now,
-                "dedup_key": key,
-                "company": target.company_name,
-                "location": loc,
+                "location": cand.get("location"),
                 "source": cand.get("source", "html"),
+                "description": cand.get("description"),
+                "matched_keywords": matched,
+                "dedup_key": key,
             }
 
         # 4. One query to find which postings we already have for this target.
@@ -423,10 +535,45 @@ class ScraperService:
                 elif doc.get("url"):
                     existing_keys.add(normalize_job_url(doc["url"]))
 
-            new_docs = [job for key, job in prepared.items() if key not in existing_keys]
+            new_candidates = [c for key, c in prepared.items() if key not in existing_keys]
             seen_keys = [key for key in prepared if key in existing_keys]
 
-            if new_docs:
+            if new_candidates:
+                # Fetch descriptions for postings that don't already have one
+                # (HTML-scraped path) — bounded concurrency + cap, see
+                # _fetch_missing_descriptions. ATS-sourced ones already have
+                # theirs from the API response, so this is a no-op for them.
+                await ScraperService._fetch_missing_descriptions(new_candidates)
+
+                new_docs = []
+                for cand in new_candidates:
+                    description = cand.get("description")
+                    yoe = extract_years_experience(description) if description else None
+                    loc = cand.get("location")
+                    snippet = (
+                        extract_description_snippet(description, _DESCRIPTION_SNIPPET_CHARS) if description
+                        else (f"{target.company_name} | {loc}" if loc else None)
+                    )
+                    new_docs.append({
+                        "target_id": target_id,
+                        "user_id": user_id,
+                        "title": cand["title"],
+                        "url": cand["url"],
+                        "description_snippet": snippet,
+                        "matched_keywords": cand["matched_keywords"],
+                        "is_new": True,
+                        "discovered_at": now,
+                        "first_seen": now,
+                        "last_seen": now,
+                        "dedup_key": cand["dedup_key"],
+                        "company": target.company_name,
+                        "location": loc,
+                        "source": cand.get("source", "html"),
+                        "years_experience_min": yoe["min"] if yoe else None,
+                        "years_experience_max": yoe["max"] if yoe else None,
+                        "years_experience_display": yoe["display"] if yoe else None,
+                    })
+
                 result = await jobs_collection.insert_many(new_docs)
                 for job, inserted_id in zip(new_docs, result.inserted_ids):
                     job["_id"] = str(inserted_id)
@@ -549,8 +696,8 @@ class ScraperService:
         is_active = False
         if data.source_type == "rss":
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                    res = await client.get(data.url, headers=HEADERS)
+                async with new_session(timeout=10.0) as client:
+                    res = await client.get(data.url)
                     if res.status_code == 200:
                         import xml.etree.ElementTree as ET
                         root = ET.fromstring(res.content)
@@ -606,8 +753,8 @@ class ScraperService:
         if new_url and source_type == "rss":
             is_active = False
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                    res = await client.get(new_url, headers=HEADERS)
+                async with new_session(timeout=10.0) as client:
+                    res = await client.get(new_url)
                     if res.status_code == 200:
                         import xml.etree.ElementTree as ET
                         root = ET.fromstring(res.content)

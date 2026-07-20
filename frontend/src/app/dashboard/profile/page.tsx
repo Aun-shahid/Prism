@@ -1,14 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { 
-  profileService, 
-  UserProfile, 
-  WorkExperience, 
-  Education, 
-  Project, 
-  Certification 
+import {
+  profileService,
+  UserProfile,
+  WorkExperience,
+  Education,
+  Project,
+  Certification
 } from '../../../services/profile';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
+import { titlesService } from '../../../services/titles';
 import {
   Box,
   Typography,
@@ -37,7 +40,8 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Autocomplete
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
@@ -53,6 +57,7 @@ import { Country, State, City } from 'country-state-city';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 
 export default function ProfilePage() {
+  const { hasActiveKey } = useApiKeys();
   const [activeTab, setActiveTab] = React.useState(0);
   const [profile, setProfile] = React.useState<UserProfile | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -70,6 +75,20 @@ export default function ProfilePage() {
   const [skillInput, setSkillInput] = React.useState('');
   const [jobTitleInput, setJobTitleInput] = React.useState('');
   const [exclusionInput, setExclusionInput] = React.useState('');
+
+  // Job-title autocomplete suggestions (debounced)
+  const [jobTitleOptions, setJobTitleOptions] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    const query = jobTitleInput.trim();
+    if (!query) {
+      setJobTitleOptions([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      titlesService.search(query, 8).then(setJobTitleOptions).catch(() => setJobTitleOptions([]));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [jobTitleInput]);
 
   // CV Upload state & ref
   const [uploading, setUploading] = React.useState(false);
@@ -554,24 +573,26 @@ export default function ProfilePage() {
                 style={{ display: 'none' }}
                 accept=".pdf,.docx,.txt"
               />
-              <Button
-                variant="contained"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUploadIcon />}
-                sx={{ 
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-                  color: '#fff',
-                  fontWeight: 700,
-                  px: 3,
-                  py: 1.5,
-                  '&:hover': {
-                    filter: 'brightness(1.1)',
-                  }
-                }}
-              >
-                {uploading ? 'Analyzing Resume...' : 'Upload CV / Resume'}
-              </Button>
+              <NoApiKeyTooltip blocked={!hasActiveKey}>
+                <Button
+                  variant="contained"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || !hasActiveKey}
+                  startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUploadIcon />}
+                  sx={{
+                    background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    px: 3,
+                    py: 1.5,
+                    '&:hover': {
+                      filter: 'brightness(1.1)',
+                    }
+                  }}
+                >
+                  {uploading ? 'Analyzing Resume...' : 'Upload CV / Resume'}
+                </Button>
+              </NoApiKeyTooltip>
             </Box>
           </Stack>
         </CardContent>
@@ -857,14 +878,22 @@ export default function ProfilePage() {
                   The job scrapers will automatically scan career sites and match positions containing these titles.
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
-                  <TextField
-                    label="Add Job Title"
-                    size="small"
-                    value={jobTitleInput}
-                    onChange={(e) => setJobTitleInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddJobTitle()}
+                  <Autocomplete
+                    freeSolo
                     fullWidth
-                    placeholder="e.g. Python Developer"
+                    size="small"
+                    options={jobTitleOptions}
+                    inputValue={jobTitleInput}
+                    onInputChange={(_e, value) => setJobTitleInput(value)}
+                    onChange={(_e, value) => { if (value) setJobTitleInput(value); }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Add Job Title"
+                        placeholder="e.g. Python Developer"
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddJobTitle()}
+                      />
+                    )}
                   />
                   <Button variant="contained" onClick={handleAddJobTitle}>Add</Button>
                 </Stack>

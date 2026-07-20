@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useAuth } from '../../../hooks/useAuth';
+import { useApiKeys } from '../../../hooks/useApiKeys';
 import { usersService } from '../../../services/users';
 import { apiKeysService, APIKey } from '../../../services/apiKeys';
 import {
@@ -28,23 +29,29 @@ import {
   Select,
   MenuItem,
   List,
-  ListItem,
-  ListItemText,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import KeyIcon from '@mui/icons-material/Key';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
+import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import EmailOutreachSettings from './EmailOutreachSettings';
 
 export default function SettingsPage() {
   const { user, checkAuth } = useAuth();
+  const { refresh: refreshApiKeys } = useApiKeys();
+  const isAdmin = user?.role === 'super_admin';
+
+  // Tabs — admins only ever see Account (API Keys / Email Outreach are hidden for them below too).
+  const [tab, setTab] = React.useState(0);
 
   // Settings states
   const [keys, setKeys] = React.useState<APIKey[]>([]);
   const [loadingKeys, setLoadingKeys] = React.useState(true);
-  
+
   // Account forms
   const [name, setName] = React.useState(user?.name || '');
   const [username, setUsername] = React.useState(user?.username || '');
@@ -62,7 +69,8 @@ export default function SettingsPage() {
 
   const [savingAccount, setSavingAccount] = React.useState(false);
   const [savingKey, setSavingKey] = React.useState(false);
-  
+  const [keyDialogError, setKeyDialogError] = React.useState<string | null>(null);
+
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
 
@@ -134,6 +142,7 @@ export default function SettingsPage() {
         }
         return k;
       }));
+      await refreshApiKeys();
     } catch (err: any) {
       alert('Failed to toggle API key status.');
     }
@@ -144,6 +153,7 @@ export default function SettingsPage() {
     try {
       await apiKeysService.deleteKey(id);
       setKeys(prev => prev.filter(k => k.id !== id));
+      await refreshApiKeys();
     } catch (err: any) {
       alert('Failed to delete API key.');
     }
@@ -153,6 +163,7 @@ export default function SettingsPage() {
     e.preventDefault();
     if (!keyForm.api_key.trim()) return;
     setSavingKey(true);
+    setKeyDialogError(null);
     try {
       const newKey = await apiKeysService.storeKey({
         provider: keyForm.provider,
@@ -166,15 +177,24 @@ export default function SettingsPage() {
           .map(k => ({ ...k, is_active: false }));
         return [...filtered, newKey];
       });
+      await refreshApiKeys();
       setOpenKeyDialog(false);
       setKeyForm({ provider: 'openai', api_key: '', label: '' });
-      setSuccess('API key configured successfully.');
+      setSuccess('API key verified and configured successfully.');
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to configure API key.');
+      setKeyDialogError(err.response?.data?.detail || 'Failed to configure API key.');
     } finally {
       setSavingKey(false);
     }
   };
+
+  const tabs = isAdmin
+    ? [{ label: 'Account', icon: <ManageAccountsIcon fontSize="small" /> }]
+    : [
+        { label: 'Account', icon: <ManageAccountsIcon fontSize="small" /> },
+        { label: 'API Keys', icon: <KeyIcon fontSize="small" /> },
+        { label: 'Email Outreach', icon: <MarkEmailReadIcon fontSize="small" /> },
+      ];
 
   return (
     <Box>
@@ -190,101 +210,103 @@ export default function SettingsPage() {
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
       {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
 
-      <Grid container spacing={4}>
-        {/* Left Column: Profile Settings */}
-        <Grid size={{ xs: 12, md: user?.role === 'super_admin' ? 12 : 6 }}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent sx={{ p: 3 }}>
-              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 3 }}>
-                <ManageAccountsIcon color="primary" />
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>Account Profile</Typography>
-              </Stack>
-              <Divider sx={{ mb: 3 }} />
+      <Tabs
+        value={tab}
+        onChange={(_e, v) => setTab(v)}
+        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+      >
+        {tabs.map((t, i) => (
+          <Tab key={i} label={t.label} icon={t.icon} iconPosition="start" sx={{ minHeight: 48, textTransform: 'none', fontWeight: 600 }} />
+        ))}
+      </Tabs>
 
-              <Box component="form" onSubmit={handleSaveAccount}>
-                <Stack spacing={3}>
-                  <TextField
-                    label="Full Name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    label="Username"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    label="Email Address"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    fullWidth
-                  />
+      {/* --- Account --- */}
+      {tab === 0 && (
+        <Grid container>
+          <Grid size={{ xs: 12, md: 8, lg: 6 }}>
+            <Card>
+              <CardContent sx={{ p: 3 }}>
+                <Box component="form" onSubmit={handleSaveAccount}>
+                  <Stack spacing={3}>
+                    <TextField
+                      label="Full Name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                      fullWidth
+                    />
+                    <TextField
+                      label="Username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                      fullWidth
+                    />
+                    <TextField
+                      label="Email Address"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      fullWidth
+                    />
 
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>
-                    Change Password (leave blank to keep current)
-                  </Typography>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>
+                      Change Password (leave blank to keep current)
+                    </Typography>
 
-                  <TextField
-                    label="New Password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Confirm New Password"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    fullWidth
-                  />
+                    <TextField
+                      label="New Password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      fullWidth
+                    />
+                    <TextField
+                      label="Confirm New Password"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      fullWidth
+                    />
 
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    startIcon={savingAccount ? <CircularProgress size={20} /> : <SaveIcon />}
-                    disabled={savingAccount}
-                    sx={{ alignSelf: 'flex-start', mt: 2 }}
-                  >
-                    Save Profile Settings
-                  </Button>
-                </Stack>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Right Column: Encrypted API Keys */}
-        {user?.role !== 'super_admin' && (
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <CardContent sx={{ p: 3, flexGrow: 1 }}>
-                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                  <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                    <KeyIcon color="secondary" />
-                    <Typography variant="h6" sx={{ fontWeight: 700 }}>Encrypted LLM Keys</Typography>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      startIcon={savingAccount ? <CircularProgress size={20} /> : <SaveIcon />}
+                      disabled={savingAccount}
+                      sx={{ alignSelf: 'flex-start', mt: 2 }}
+                    >
+                      Save Profile Settings
+                    </Button>
                   </Stack>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* --- API Keys --- */}
+      {tab === 1 && !isAdmin && (
+        <Grid container>
+          <Grid size={{ xs: 12, md: 8, lg: 6 }}>
+            <Card>
+              <CardContent sx={{ p: 3 }}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', flex: 1, mr: 2 }}>
+                    Keys are stored encrypted on the backend database, and verified with the provider when added.
+                  </Typography>
                   <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => setOpenKeyDialog(true)}>
                     Configure Key
                   </Button>
                 </Stack>
-                <Divider sx={{ mb: 3 }} />
-
-                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-                  Keys are stored encrypted on the backend database. They are only decrypted in memory during resume tailoring.
-                </Typography>
 
                 {loadingKeys ? (
                   <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
                 ) : keys.length === 0 ? (
                   <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
-                    No API keys configured yet. Tailoring tools require at least one provider key.
+                    No API keys configured yet. AI tools require at least one provider key.
                   </Paper>
                 ) : (
                   <List>
@@ -299,10 +321,10 @@ export default function SettingsPage() {
                               {k.label || 'Default Key'}
                             </Typography>
                           </Box>
-                          
+
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                            <Switch 
-                              checked={k.is_active} 
+                            <Switch
+                              checked={k.is_active}
                               onChange={() => handleToggleKey(k)}
                               size="small"
                             />
@@ -318,11 +340,11 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </Grid>
-        )}
-      </Grid>
+        </Grid>
+      )}
 
-      {/* Email Outreach settings (how the AI writes + send guardrails + inbound) */}
-      {user?.role !== 'super_admin' && <EmailOutreachSettings />}
+      {/* --- Email Outreach --- */}
+      {tab === 2 && !isAdmin && <EmailOutreachSettings />}
 
       {/* Configure Key Dialog */}
       <Dialog open={openKeyDialog} onClose={() => setOpenKeyDialog(false)} fullWidth maxWidth="xs">
@@ -330,6 +352,7 @@ export default function SettingsPage() {
           <DialogTitle sx={{ fontWeight: 800 }}>Add AI Provider Key</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
+              {keyDialogError && <Alert severity="error" onClose={() => setKeyDialogError(null)}>{keyDialogError}</Alert>}
               <FormControl fullWidth>
                 <InputLabel id="provider-select-label">AI Provider</InputLabel>
                 <Select
@@ -366,7 +389,7 @@ export default function SettingsPage() {
           <DialogActions sx={{ p: 3 }}>
             <Button onClick={() => setOpenKeyDialog(false)}>Cancel</Button>
             <Button variant="contained" type="submit" disabled={savingKey}>
-              {savingKey ? <CircularProgress size={20} /> : 'Save Key'}
+              {savingKey ? <CircularProgress size={20} /> : 'Verify & Save Key'}
             </Button>
           </DialogActions>
         </Box>

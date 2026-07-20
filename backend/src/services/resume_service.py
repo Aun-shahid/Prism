@@ -250,6 +250,7 @@ class ResumeService:
                 system_prompt=RESUME_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 preferred_provider=request.preferred_provider,
+                purpose="tailor",
             )
             resume_sections = _parse_ai_sections(raw)
 
@@ -265,6 +266,7 @@ class ResumeService:
                 system_prompt=COVER_LETTER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 preferred_provider=request.preferred_provider,
+                purpose="tailor",
             )
 
         # Store generated document
@@ -329,6 +331,7 @@ class ResumeService:
                 RESUME_TAILOR_SYSTEM_PROMPT,
                 "\n\n".join(parts),
                 preferred_provider=request.preferred_provider,
+                purpose="tailor",
             )
             if isinstance(result, dict):
                 operations = _validate_operations(result.get("operations"), request.sections)
@@ -346,6 +349,7 @@ class ResumeService:
                 system_prompt=COVER_LETTER_SYSTEM_PROMPT,
                 user_prompt=cl_prompt,
                 preferred_provider=request.preferred_provider,
+                purpose="tailor",
             )
 
         logger.info(f"Tailored resume for user {user_id}: {len(operations)} op(s) using {provider_used}")
@@ -380,6 +384,7 @@ class ResumeService:
             BULLET_COACH_SYSTEM_PROMPT,
             "\n\n".join(parts),
             preferred_provider=preferred_provider,
+            purpose="tailor",
         )
         return {
             "improved": result.get("improved") or text,

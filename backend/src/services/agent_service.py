@@ -164,7 +164,7 @@ class AgentService:
         chat_messages.append({"role": "user", "content": message})
 
         reply, provider_used = await AIService.generate_chat(
-            user_id, system_prompt, chat_messages, preferred_provider=preferred_provider
+            user_id, system_prompt, chat_messages, preferred_provider=preferred_provider, purpose="chat"
         )
 
         # --- Persist ----------------------------------------------------
@@ -314,6 +314,7 @@ class AgentService:
                 CLASSIFIER_SYSTEM_PROMPT,
                 context + "User message:\n" + message[:6000],
                 preferred_provider=preferred_provider,
+                purpose="fast",
             )
             return classification
         except HTTPException as e:

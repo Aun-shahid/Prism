@@ -47,6 +47,11 @@ class ScrapedJob(BaseModel):
     company: Optional[str] = None            # resolved company name, when known
     location: Optional[str] = None           # posting location, when known
     source: Optional[str] = None             # e.g. "greenhouse", "lever", "html", "rss"
+    # --- years-of-experience requirement, extracted from the description via
+    # a small regex dictionary (scraper_utils.extract_years_experience) ---
+    years_experience_min: Optional[int] = None
+    years_experience_max: Optional[int] = None
+    years_experience_display: Optional[str] = None  # e.g. "3-5 years", "5+ years"
 
     class Config:
         populate_by_name = True
@@ -60,10 +65,13 @@ class ScraperTargetCreateRequest(BaseModel):
 
 
 class WatchCompanyRequest(BaseModel):
-    """Add a company to the watchlist by name only — AI research fills the rest."""
+    """Add a company to the watchlist — AI research fills in whatever isn't given."""
     company_name: str
     keywords: List[str] = []
     preferred_provider: Optional[str] = None
+    # Optional: if the user already knows the careers/jobs page, providing it
+    # skips the AI having to search for and guess at the right URL.
+    career_url: Optional[str] = None
 
 
 class ScraperTargetUpdateRequest(BaseModel):
@@ -113,6 +121,9 @@ class ScrapedJobResponse(BaseModel):
     company: Optional[str] = None
     location: Optional[str] = None
     source: Optional[str] = None
+    years_experience_min: Optional[int] = None
+    years_experience_max: Optional[int] = None
+    years_experience_display: Optional[str] = None
 
     class Config:
         populate_by_name = True

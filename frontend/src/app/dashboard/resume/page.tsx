@@ -3,7 +3,7 @@
 import * as React from 'react';
 import {
   Box, Typography, Button, IconButton, Stack, Alert, CircularProgress,
-  Tooltip, Chip, Divider, TextField, FormControl, InputLabel,
+  Tooltip, Divider, TextField, FormControl, InputLabel,
   Select, MenuItem, Switch, Slider, Accordion, AccordionSummary,
   AccordionDetails, Dialog, DialogTitle, DialogContent, DialogActions,
   Drawer, Popover, AppBar, Toolbar, Snackbar, Paper,
@@ -30,6 +30,8 @@ import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import SyncIcon from '@mui/icons-material/Sync';
 
 import { useAuth } from '../../../hooks/useAuth';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 import { profileService, UserProfile } from '../../../services/profile';
 import { applicationsService, JobApplication } from '../../../services/applications';
 import { resumeService, TailorResult } from '../../../services/resume';
@@ -221,6 +223,7 @@ function AiBulletField({
   rows?: number;
   placeholder?: string;
 }) {
+  const { hasActiveKey } = useApiKeys();
   const [anchor, setAnchor] = React.useState<HTMLElement | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -262,12 +265,12 @@ function AiBulletField({
           onChange={e => onChange(e.target.value)}
           slotProps={{ htmlInput: { style: { paddingRight: 30 } } }}
         />
-        <Tooltip title="Improve with AI">
+        <Tooltip title={!hasActiveKey ? 'Add an API key in Settings to use AI features.' : 'Improve with AI'}>
           <span>
             <IconButton
               size="small"
               onClick={run}
-              disabled={!value.trim()}
+              disabled={!value.trim() || !hasActiveKey}
               sx={{ position: 'absolute', top: 3, right: 3, color: 'secondary.main' }}
             >
               <AutoFixHighIcon sx={{ fontSize: 16 }} />
@@ -357,6 +360,7 @@ function AiBulletField({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ResumeBuilderPage() {
   const { user } = useAuth();
+  const { hasActiveKey } = useApiKeys();
   const resumeRef = React.useRef<HTMLDivElement>(null);
 
   const [profile, setProfile] = React.useState<UserProfile | null>(null);
@@ -504,7 +508,8 @@ export default function ResumeBuilderPage() {
       setAiPreview(result);
       setAiOpen(false);
     } catch (e: unknown) {
-      setAiError((e as Error)?.message || 'Generation failed');
+      const ex = e as { response?: { data?: { detail?: string } } };
+      setAiError(ex.response?.data?.detail || 'Generation failed');
     } finally {
       setAiLoading(false);
     }
@@ -657,10 +662,6 @@ export default function ResumeBuilderPage() {
               sx={{ width: 200, '& .MuiInput-underline:before': { borderBottomColor: 'transparent' } }}
             />
 
-            {active.isAiTailored && (
-              <Chip label="AI" size="small" color="secondary" icon={<AutoAwesomeIcon />} sx={{ ml: 0.5 }} />
-            )}
-
             <Box sx={{ flex: 1 }} />
 
             {saving && <CircularProgress size={14} sx={{ mr: 1 }} />}
@@ -674,10 +675,12 @@ export default function ResumeBuilderPage() {
             </Tooltip>
 
             {/* AI Tailor */}
-            <Button size="small" startIcon={<AutoAwesomeIcon />} onClick={() => setAiOpen(true)}
-              sx={{ textTransform: 'none' }}>
-              AI Tailor
-            </Button>
+            <NoApiKeyTooltip blocked={!hasActiveKey}>
+              <Button size="small" startIcon={<AutoAwesomeIcon />} onClick={() => setAiOpen(true)}
+                disabled={!hasActiveKey} sx={{ textTransform: 'none' }}>
+                AI Tailor
+              </Button>
+            </NoApiKeyTooltip>
 
             {/* Customize */}
             <Button size="small" startIcon={<SettingsIcon />} onClick={() => setCustomizeOpen(true)}

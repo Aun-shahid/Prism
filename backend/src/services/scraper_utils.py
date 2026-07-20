@@ -4,12 +4,131 @@ general-feed scraper. Keeping these free of I/O makes them trivial to unit-test
 and safe to reuse in both scraping paths.
 
 Responsibilities:
-  * normalize_job_url  — stable de-duplication key for a posting URL
-  * is_excluded        — apply a user's job_preferences.exclusions list
-  * looks_like_job_link — filter navigation/footer noise out of HTML scrapes
+  * normalize_job_url        — stable de-duplication key for a posting URL
+  * is_excluded               — apply a user's job_preferences.exclusions list
+  * looks_like_job_link       — filter navigation/footer noise out of HTML scrapes
+  * keyword_matches           — relevance match between a job title and search keywords
+  * extract_years_experience — pull a "years of experience" requirement out of a
+                                 job description via a small regex dictionary (no AI)
 """
 
+import re
+from typing import Optional
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+
+_STOPWORDS = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "with", "&"}
+
+
+def _tokenize(text: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9+#]+", text.lower()) if w not in _STOPWORDS and len(w) > 1}
+
+
+def keyword_matches(title: str, keywords) -> list:
+    """
+    Return the subset of `keywords` that are a meaningful match for a job title.
+
+    Real employer-posted titles rarely phrase things identically to a user's
+    target role (e.g. profile keyword "Software Engineer" vs a posting titled
+    "Software Solution Architect" or "Senior Backend Developer") — a naive
+    "is the whole keyword phrase a substring of the title" check silently
+    drops nearly every real posting. Instead: a keyword matches if the whole
+    phrase appears verbatim (strongest signal), OR if it shares at least one
+    significant word with the title.
+
+    Deliberately permissive (recall over precision, one-word overlap is
+    enough regardless of keyword phrase length) — a job search tool should
+    err toward surfacing a plausible posting over silently hiding a real one,
+    especially for compound profile titles like "Software & AI Engineer"
+    where requiring most/all words to overlap misses obvious matches like
+    "Software Solution Architect".
+    """
+    if not keywords:
+        return []
+    title_lower = title.lower()
+    title_tokens = _tokenize(title)
+    matched = []
+    for kw in keywords:
+        kw_lower = (kw or "").lower().strip()
+        if not kw_lower:
+            continue
+        if kw_lower in title_lower:
+            matched.append(kw)
+            continue
+        kw_tokens = _tokenize(kw_lower)
+        if kw_tokens and (kw_tokens & title_tokens):
+            matched.append(kw)
+    return matched
+
+
+# Matches "N years", "N-M years", "N+ yrs", etc. — the context check below
+# requires "experience"/"exp" nearby so this doesn't fire on unrelated mentions
+# like "we've been in business for 10 years".
+_YOE_NUMBER_RE = re.compile(r"(\d{1,2})\s*(?:(?:-|to|–|—)\s*(\d{1,2}))?\s*\+?\s*(?:years?|yrs?)\b", re.I)
+_EXPERIENCE_CONTEXT_RE = re.compile(r"experience|exp\b", re.I)
+_YOE_CONTEXT_WINDOW = 40  # chars to look either side of a years-match for "experience"
+_YOE_MAX_PLAUSIBLE = 30   # ignore obvious typos/unrelated numbers above this
+
+
+def extract_years_experience(text: str) -> Optional[dict]:
+    """
+    Pull a "years of experience" requirement out of free text via a small
+    regex dictionary — pure code, no AI ([[prism-cost-constraint]]).
+
+    Returns the FIRST plausible match as {"min": int, "max": Optional[int],
+    "display": str}, or None if no requirement is found. A number+"years"
+    match only counts if "experience"/"exp" appears within ~40 characters of
+    it, which is what keeps this from matching things like "founded 15 years
+    ago" or "10 years in business".
+    """
+    if not text:
+        return None
+    for m in _YOE_NUMBER_RE.finditer(text):
+        start, end = m.span()
+        window = text[max(0, start - _YOE_CONTEXT_WINDOW): end + _YOE_CONTEXT_WINDOW]
+        if not _EXPERIENCE_CONTEXT_RE.search(window):
+            continue
+        low = int(m.group(1))
+        high = int(m.group(2)) if m.group(2) else None
+        if high is not None and high < low:
+            low, high = high, low
+        if low > _YOE_MAX_PLAUSIBLE or (high and high > _YOE_MAX_PLAUSIBLE):
+            continue
+        display = f"{low}-{high} years" if high is not None else f"{low}+ years"
+        return {"min": low, "max": high, "display": display}
+    return None
+
+
+# Section headers that typically mark where a job posting's real content
+# starts, after a page's nav/header chrome — used to keep a truncated
+# description snippet from being pure "About Services Blog Contact..." junk.
+_CONTENT_MARKERS = (
+    "about the role", "about this role", "the role", "job description",
+    "role & responsibilities", "role and responsibilities", "responsibilities",
+    "what you'll do", "what you will do", "key responsibilities",
+    "requirements", "qualifications", "who you are", "about you",
+    "the opportunity", "your mission",
+)
+
+
+def extract_description_snippet(text: str, max_chars: int = 600) -> str:
+    """
+    Truncate raw page text to a display snippet, skipping past nav/header
+    boilerplate when possible. A full-page text fetch (used to also scan for
+    a years-of-experience requirement) usually starts with menu/nav text
+    before the actual posting content — naively taking the first `max_chars`
+    would show almost nothing but that.
+    """
+    if not text:
+        return ""
+    lowered = text.lower()
+    best_pos = None
+    for marker in _CONTENT_MARKERS:
+        pos = lowered.find(marker)
+        if pos != -1 and pos > 30 and (best_pos is None or pos < best_pos):
+            best_pos = pos
+    start = best_pos if best_pos is not None else 0
+    return text[start:start + max_chars].strip()
+
 
 # Query params that are pure tracking / attribution and never identify a posting.
 # We strip these so the same job with different UTM tags de-duplicates cleanly,

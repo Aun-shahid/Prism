@@ -4,8 +4,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
+from curl_cffi.requests import AsyncSession
 from fastapi import HTTPException, status
-import httpx
 from bs4 import BeautifulSoup
 
 from ..database import (
@@ -17,28 +17,25 @@ from ..database import (
 from ..models.scraper import ScrapedJob
 from ..models.general_sources import GeneralScraperSource
 from .logging_service import get_logger
-from .scraper_utils import normalize_job_url, is_excluded
+from .scraper_utils import normalize_job_url, is_excluded, keyword_matches
+from .stealth_http import new_session
 
 # Bounded concurrency for the per-posting LinkedIn applicant-count fetches.
 _APPLICANT_FETCH_CONCURRENCY = 5
 
 logger = get_logger("general_scraper_service")
 
-# Browser headers to avoid scraper blocks
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+# HTTP fetches use stealth_http.new_session() (TLS/JA3 browser impersonation
+# via curl_cffi) instead of a hand-set User-Agent — see stealth_http.py.
 
 
 class GeneralScraperService:
 
     @staticmethod
-    async def _get_applicant_count(job_url: str, client: httpx.AsyncClient) -> Optional[int]:
+    async def _get_applicant_count(job_url: str, client: AsyncSession) -> Optional[int]:
         """Fetch LinkedIn job detail page and extract applicant count."""
         try:
-            res = await client.get(job_url, headers=HEADERS, follow_redirects=True, timeout=15.0)
+            res = await client.get(job_url, timeout=15.0)
             if res.status_code != 200:
                 return None
             soup = BeautifulSoup(res.text, "html.parser")
@@ -64,7 +61,7 @@ class GeneralScraperService:
         if locations:
             queries = [f"{keyword} {loc}" for loc in locations]
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with new_session(timeout=15.0) as client:
             # Pre-fetch blacklist URLs for fast lookup
             blacklist_col = get_blacklisted_jobs_collection()
             blacklisted_urls = set()
@@ -74,7 +71,7 @@ class GeneralScraperService:
             for query in queries:
                 url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={query}"
                 try:
-                    res = await client.get(url, headers=HEADERS)
+                    res = await client.get(url)
                     if res.status_code != 200:
                         logger.warning(f"LinkedIn guest search for '{query}' returned status {res.status_code}. Deactivating source.")
                         try:
@@ -193,8 +190,8 @@ class GeneralScraperService:
         url = "https://www.arbeitnow.com/api/job-board-api"
         jobs = []
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                res = await client.get(url, headers=HEADERS)
+            async with new_session(timeout=15.0) as client:
+                res = await client.get(url)
                 if res.status_code != 200:
                     logger.warning(f"Failed to fetch Arbeitnow JSON API: HTTP status {res.status_code}. Deactivating source.")
                     try:
@@ -218,18 +215,18 @@ class GeneralScraperService:
                     logger.error(f"Failed to activate Arbeitnow source in DB: {db_err}")
 
                 data = res.json().get("data", [])
-                keyword_lower = keyword.lower()
                 for item in data:
                     title = item.get("title", "")
                     company = item.get("company_name", "")
                     location = item.get("location", "")
                     url_link = item.get("url", "")
-                    tags = [t.lower() for t in item.get("tags", [])]
-                    
-                    # Match keyword in title, company or tags
-                    keyword_match = (keyword_lower in title.lower() or 
-                                     keyword_lower in company.lower() or 
-                                     any(keyword_lower in t for t in tags))
+                    tags = item.get("tags", [])
+
+                    # Match keyword against title, company, or tags (token-overlap,
+                    # not a brittle whole-phrase substring check — see keyword_matches).
+                    keyword_match = bool(
+                        keyword_matches(f"{title} {company} {' '.join(tags)}", [keyword])
+                    )
                     if not keyword_match:
                         continue
 
@@ -267,8 +264,8 @@ class GeneralScraperService:
         """Generic RSS feed parser that filters items by search keyword and locations."""
         jobs = []
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                res = await client.get(url, headers=HEADERS)
+            async with new_session(timeout=15.0) as client:
+                res = await client.get(url)
                 if res.status_code != 200:
                     logger.warning(f"Failed to fetch RSS feed {url}: HTTP status {res.status_code}. Deactivating source.")
                     try:
@@ -288,7 +285,6 @@ class GeneralScraperService:
                 except Exception as db_err:
                     logger.error(f"Failed to activate source in DB: {db_err}")
 
-                keyword_lower = keyword.lower()
                 for item in root.findall(".//item"):
                     title_elem = item.find("title")
                     link_elem = item.find("link")
@@ -298,8 +294,9 @@ class GeneralScraperService:
                     link = link_elem.text if link_elem is not None else ""
                     desc = desc_elem.text if desc_elem is not None else ""
 
-                    # Check for keyword match in title or description
-                    keyword_match = keyword_lower in title.lower() or keyword_lower in desc.lower()
+                    # Check for keyword match in title or description (token-overlap,
+                    # not a brittle whole-phrase substring check — see keyword_matches).
+                    keyword_match = bool(keyword_matches(f"{title} {desc}", [keyword]))
                     if not keyword_match:
                         continue
 

@@ -26,6 +26,8 @@ export interface ScraperTarget {
 export interface WatchCompanyPayload {
   company_name: string;
   keywords?: string[];
+  // Optional: skip AI careers-URL discovery by supplying it directly.
+  career_url?: string;
 }
 
 export interface ScrapedJob {
@@ -38,6 +40,9 @@ export interface ScrapedJob {
   matched_keywords: string[];
   is_new: boolean;
   discovered_at: string;
+  years_experience_min?: number | null;
+  years_experience_max?: number | null;
+  years_experience_display?: string | null;
 }
 
 export interface PaginatedScrapedJobs {

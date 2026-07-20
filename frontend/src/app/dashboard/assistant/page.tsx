@@ -36,6 +36,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SyncIcon from '@mui/icons-material/Sync';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { useAuth } from '../../../hooks/useAuth';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 import {
   assistantService,
   AgentStep,
@@ -199,6 +201,7 @@ function MarkdownBody({ content }: { content: string }) {
 
 export default function AssistantPage() {
   const { user } = useAuth();
+  const { hasActiveKey } = useApiKeys();
   const [conversations, setConversations] = React.useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
@@ -286,7 +289,7 @@ export default function AssistantPage() {
 
   const send = async (text?: string) => {
     const message = (text ?? input).trim();
-    if (!message || sending) return;
+    if (!message || sending || !hasActiveKey) return;
     setError(null);
     setInput('');
     setSending(true);
@@ -660,22 +663,24 @@ export default function AssistantPage() {
               disabled={sending}
               slotProps={{ input: { sx: { borderRadius: 3, fontSize: '0.9rem' } } }}
             />
-            <IconButton
-              onClick={() => send()}
-              disabled={sending || !input.trim()}
-              sx={{
-                width: 44,
-                height: 44,
-                background: input.trim()
-                  ? 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)'
-                  : 'rgba(255,255,255,0.06)',
-                color: '#fff',
-                '&:hover': { opacity: 0.9 },
-                '&.Mui-disabled': { color: 'rgba(255,255,255,0.3)' },
-              }}
-            >
-              <SendIcon sx={{ fontSize: 20 }} />
-            </IconButton>
+            <NoApiKeyTooltip blocked={!hasActiveKey}>
+              <IconButton
+                onClick={() => send()}
+                disabled={sending || !input.trim() || !hasActiveKey}
+                sx={{
+                  width: 44,
+                  height: 44,
+                  background: input.trim()
+                    ? 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)'
+                    : 'rgba(255,255,255,0.06)',
+                  color: '#fff',
+                  '&:hover': { opacity: 0.9 },
+                  '&.Mui-disabled': { color: 'rgba(255,255,255,0.3)' },
+                }}
+              >
+                <SendIcon sx={{ fontSize: 20 }} />
+              </IconButton>
+            </NoApiKeyTooltip>
           </Stack>
           <Typography
             variant="caption"

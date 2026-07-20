@@ -404,6 +404,7 @@ class ProfileService:
             user_id=user_id,
             system_prompt=system_prompt,
             user_prompt=f"Here is my resume content:\n\n{text}",
+            purpose="tailor",
         )
 
         res_text = res_text.strip()

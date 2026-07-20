@@ -3,7 +3,10 @@
 import * as React from 'react';
 import { scraperService, ScraperTarget, ScrapedJob, GeneralScraperSource } from '../../../services/scraper';
 import { applicationsService } from '../../../services/applications';
+import { titlesService } from '../../../services/titles';
 import { useAuth } from '../../../hooks/useAuth';
+import { useApiKeys } from '../../../hooks/useApiKeys';
+import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 import {
   Box,
   Typography,
@@ -65,8 +68,24 @@ export default function WatchlistPage() {
 
   // Hero "watch a company" form
   const [companyInput, setCompanyInput] = React.useState('');
-  const [watchKeywordsInput, setWatchKeywordsInput] = React.useState('');
+  const [watchKeywords, setWatchKeywords] = React.useState<string[]>([]);
+  const [watchKeywordsText, setWatchKeywordsText] = React.useState('');
+  const [watchKeywordsOptions, setWatchKeywordsOptions] = React.useState<string[]>([]);
+  const [watchCareerUrlInput, setWatchCareerUrlInput] = React.useState('');
   const [watching, setWatching] = React.useState(false);
+
+  // Debounced job-title suggestions for the keywords autocomplete
+  React.useEffect(() => {
+    const query = watchKeywordsText.trim();
+    if (!query) {
+      setWatchKeywordsOptions([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      titlesService.search(query, 8).then(setWatchKeywordsOptions).catch(() => setWatchKeywordsOptions([]));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [watchKeywordsText]);
 
   // Dialog for manual Add target (with URL)
   const [openAddDialog, setOpenAddDialog] = React.useState(false);
@@ -124,6 +143,7 @@ export default function WatchlistPage() {
   const [totalPages, setTotalPages] = React.useState(1);
 
   const { user } = useAuth();
+  const { hasActiveKey } = useApiKeys();
   const isAdmin = user?.role === 'super_admin';
 
   const loadJobs = React.useCallback(async (pageNum: number, filter: string) => {
@@ -216,14 +236,18 @@ export default function WatchlistPage() {
     setWatching(true);
     setError(null);
     try {
-      const keywords = watchKeywordsInput
-        .split(',')
-        .map(k => k.trim())
-        .filter(Boolean);
-      const target = await scraperService.watchCompany({ company_name: name, keywords });
+      const keywords = watchKeywords.map(k => k.trim()).filter(Boolean);
+      const careerUrl = watchCareerUrlInput.trim();
+      const target = await scraperService.watchCompany({
+        company_name: name,
+        keywords,
+        career_url: careerUrl || undefined,
+      });
       setTargets(prev => [target, ...prev]);
       setCompanyInput('');
-      setWatchKeywordsInput('');
+      setWatchKeywords([]);
+      setWatchKeywordsText('');
+      setWatchCareerUrlInput('');
       setSuccess(`Watching ${name} — AI research is running, results appear in a moment.`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to add company.');
@@ -524,29 +548,50 @@ export default function WatchlistPage() {
                 size="small"
                 sx={{ flex: 2, bgcolor: 'rgba(9,13,22,0.5)', borderRadius: 1 }}
               />
-              <TextField
-                placeholder="Keywords (optional, comma-separated) — e.g. frontend, react"
-                value={watchKeywordsInput}
-                onChange={(e) => setWatchKeywordsInput(e.target.value)}
+              <Autocomplete
+                multiple
+                freeSolo
+                options={watchKeywordsOptions}
+                value={watchKeywords}
+                inputValue={watchKeywordsText}
+                onInputChange={(_e, value) => setWatchKeywordsText(value)}
+                onChange={(_e, value) => setWatchKeywords(value)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    placeholder="Extra keywords (optional) — your Target Job Titles from Profile are always searched too"
+                    size="small"
+                  />
+                )}
                 size="small"
                 sx={{ flex: 3, bgcolor: 'rgba(9,13,22,0.5)', borderRadius: 1 }}
               />
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={!companyInput.trim() || watching}
-                startIcon={watching ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <TravelExploreIcon />}
-                sx={{
-                  fontWeight: 700,
-                  px: 3,
-                  whiteSpace: 'nowrap',
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-                  boxShadow: '0 4px 12px 0 rgba(124, 58, 237, 0.3)',
-                }}
-              >
-                Watch & Research
-              </Button>
+              <NoApiKeyTooltip blocked={!hasActiveKey}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={!companyInput.trim() || watching || !hasActiveKey}
+                  startIcon={watching ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <TravelExploreIcon />}
+                  sx={{
+                    fontWeight: 700,
+                    px: 3,
+                    whiteSpace: 'nowrap',
+                    background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
+                    boxShadow: '0 4px 12px 0 rgba(124, 58, 237, 0.3)',
+                  }}
+                >
+                  Watch & Research
+                </Button>
+              </NoApiKeyTooltip>
             </Stack>
+            <TextField
+              placeholder="Careers/jobs page URL (optional) — skips AI having to search for it"
+              value={watchCareerUrlInput}
+              onChange={(e) => setWatchCareerUrlInput(e.target.value)}
+              size="small"
+              fullWidth
+              sx={{ mt: 1.5, bgcolor: 'rgba(9,13,22,0.5)', borderRadius: 1 }}
+            />
           </Box>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.25 }}>
             AI finds the official website, careers &amp; jobs pages and a company brief automatically.{' '}
@@ -736,13 +781,13 @@ export default function WatchlistPage() {
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title="Re-run AI research">
+                    <Tooltip title={!hasActiveKey ? 'Add an API key in Settings to use AI features.' : 'Re-run AI research'}>
                       <span>
                         <IconButton
                           size="small"
                           color="primary"
                           onClick={() => handleResearchTarget(t.id)}
-                          disabled={t.research_status === 'pending'}
+                          disabled={t.research_status === 'pending' || !hasActiveKey}
                         >
                           <AutoAwesomeIcon fontSize="small" />
                         </IconButton>
@@ -827,9 +872,18 @@ export default function WatchlistPage() {
                     >
                       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                         <Box sx={{ maxWidth: '80%' }}>
-                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}>
                             <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{job.title}</Typography>
                             {job.is_new && <Chip label="NEW" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800 }} />}
+                            {job.years_experience_display && (
+                              <Chip
+                                label={job.years_experience_display}
+                                size="small"
+                                variant="outlined"
+                                color="secondary"
+                                sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
+                              />
+                            )}
                           </Stack>
                           <Typography variant="subtitle2" color="secondary.main" sx={{ fontWeight: 600 }}>
                             {company}

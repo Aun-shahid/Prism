@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/Scripts/python.exe -c \"import src.main; from src.services.ai_service import AIService; print\\('IMPORT OK'\\)\")",
+      "Bash(./venv/Scripts/python.exe -c \"import src.main; from src.services.api_key_service import APIKeyService; print\\('IMPORT OK'\\)\")",
+      "Bash(PYTHONPATH=\"a:/Codexcape/Prism/backend\" ./venv/Scripts/python.exe \"C:/Users/aunsh/AppData/Local/Temp/claude/a--Codexcape-Prism/3c1bf2b7-b1c3-449f-bc5d-d71acd818914/scratchpad/test_validate_key.py\")",
+      "Bash(./node_modules/.bin/tsc.cmd --noEmit -p tsconfig.json)",
+      "Bash(echo \"EXIT=$?\")",
+      "Read(//tmp/**)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(PYTHONPATH=a:/Codexcape/Prism/backend ./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/aunsh/AppData/Local/Temp/claude/a--Codexcape-Prism/3c1bf2b7-b1c3-449f-bc5d-d71acd818914/scratchpad/test_keyword_match.py\")",
+      "Bash(./venv/Scripts/python.exe -m pip install google-genai)",
+      "Bash(./venv/Scripts/python.exe -m pip show google-ai-generativelanguage)",
+      "Bash(./venv/Scripts/python.exe -m pip show google-api-python-client)",
+      "Bash(./venv/Scripts/python.exe -m pip show google-api-core)",
+      "Bash(./venv/Scripts/python.exe -m pip uninstall -y google-generativeai google-ai-generativelanguage)",
+      "Bash(./venv/Scripts/python.exe -c \"import src.main; from src.services.scraper_service import ScraperService; print\\('IMPORT OK'\\)\")",
+      "Bash(grep -E '^src[/\\\\\\\\]' /tmp/tsc_yoe.txt)",
+      "WebFetch(domain:openai.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:www.aipricing.guru)",
+      "WebFetch(domain:www.tldl.io)",
+      "Bash(./venv/Scripts/python.exe -m pip install curl_cffi)",
+      "Bash(./venv/Scripts/python.exe -m pip install zendriver)"
+    ]
+  }
+}

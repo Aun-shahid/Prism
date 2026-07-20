@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,13 +10,57 @@ from .logging_service import get_logger
 
 logger = get_logger("ai_service")
 
-# Default model per provider. Kept in one place so upgrades are a one-line change.
-OPENAI_MODEL = "gpt-5-mini"
-GEMINI_MODEL = "gemini-3-flash-preview"
+# Model tiers per provider, verified live against the real OpenAI/Gemini APIs
+# (both a `models.list()`/`models.get()` check AND an actual minimal
+# generation call) before being picked — see CHANGELOG for the full pricing
+# comparison this was based on. Callers pick a "purpose", not a raw model
+# string, so future upgrades happen in one place:
+#
+#   fast   — cheap/quick: intent classification, routing, internal decisions
+#   chat   — the assistant's final user-facing reply
+#   tailor — resume/cover-letter generation, tailoring, bullet coaching
+#
+# "fast" is intentionally left at the original baseline model for each
+# provider. Any call site that doesn't explicitly pass `purpose=` defaults to
+# "fast", so unmodified call sites (company research, inbound-reply drafting,
+# etc.) keep their exact prior behavior — only the assistant chat and the
+# resume/AI-Tailor paths were re-tiered.
+OPENAI_MODEL_TIERS = {
+    "fast": "gpt-5-mini",
+    "chat": "gpt-5.6-luna",
+    "tailor": "gpt-5.6-terra",
+}
+GEMINI_MODEL_TIERS = {
+    "fast": "gemini-3-flash-preview",
+    "chat": "gemini-3.5-flash",
+    "tailor": "gemini-3.1-pro-preview",
+}
+# Claude wasn't part of this round's research (scoped to OpenAI/Gemini) — one
+# tier for every purpose, unchanged from before.
 CLAUDE_MODEL = "claude-opus-4-8"
+CLAUDE_MODEL_TIERS = {"fast": CLAUDE_MODEL, "chat": CLAUDE_MODEL, "tailor": CLAUDE_MODEL}
 
+_MODEL_TIERS: Dict[Any, Dict[str, str]] = {
+    AIProvider.OPENAI: OPENAI_MODEL_TIERS,
+    AIProvider.GEMINI: GEMINI_MODEL_TIERS,
+    AIProvider.CLAUDE: CLAUDE_MODEL_TIERS,
+}
+
+# Kept for any external reference to "the" model per provider (e.g. the key
+# validation endpoint, which just needs any one valid model name).
+OPENAI_MODEL = OPENAI_MODEL_TIERS["fast"]
+GEMINI_MODEL = GEMINI_MODEL_TIERS["fast"]
+
+
+def _model_for(provider: AIProvider, purpose: str) -> str:
+    tiers = _MODEL_TIERS.get(provider, OPENAI_MODEL_TIERS)
+    return tiers.get(purpose, tiers["fast"])
+
+
+# gemini-embedding-001 is listed by the API but fails on a real embed call —
+# verified live; gemini-embedding-2 is the one that actually works.
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-2"
 
 DEFAULT_MAX_TOKENS = 8192
 
@@ -68,6 +111,42 @@ class AIService:
         )
 
     # ------------------------------------------------------------------
+    # Key validation — cheap metadata calls, never spend generation tokens
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def validate_key(provider: AIProvider, api_key: str) -> None:
+        """
+        Verify an API key actually works before it's persisted, using each
+        provider's free/metadata-only endpoint (never a real generation call).
+        Raises HTTPException(400) with a short reason on failure.
+        """
+        try:
+            if provider == AIProvider.OPENAI:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=api_key)
+                await client.models.retrieve(OPENAI_MODEL)
+            elif provider == AIProvider.GEMINI:
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                await client.aio.models.get(model=GEMINI_MODEL)
+            elif provider == AIProvider.CLAUDE:
+                from anthropic import AsyncAnthropic
+                client = AsyncAnthropic(api_key=api_key)
+                await client.models.retrieve(CLAUDE_MODEL)
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported provider")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"API key validation failed for {provider.value}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Could not verify this {provider.value} key — it may be invalid, "
+                       f"revoked, or lack access. ({str(e)[:150]})",
+            )
+
+    # ------------------------------------------------------------------
     # Text generation (single turn — kept for backwards compatibility)
     # ------------------------------------------------------------------
 
@@ -78,9 +157,14 @@ class AIService:
         user_prompt: str,
         provider: Optional[AIProvider] = None,
         preferred_provider: Optional[str] = None,
+        purpose: str = "fast",
     ) -> tuple[str, str]:
         """
         Generate text using the user's own API key.
+
+        `purpose` selects the model tier ("fast" | "chat" | "tailor") — see
+        the tier tables above. Defaults to "fast" so existing callers that
+        don't specify one are unaffected.
 
         Returns:
             (generated_text, provider_used)
@@ -91,6 +175,7 @@ class AIService:
             [{"role": "user", "content": user_prompt}],
             provider=provider,
             preferred_provider=preferred_provider,
+            purpose=purpose,
         )
 
     # ------------------------------------------------------------------
@@ -104,10 +189,13 @@ class AIService:
         messages: List[Dict[str, str]],
         provider: Optional[AIProvider] = None,
         preferred_provider: Optional[str] = None,
+        purpose: str = "fast",
     ) -> tuple[str, str]:
         """
         Multi-turn chat completion. `messages` is a list of
         {"role": "user"|"assistant", "content": str} dicts.
+
+        `purpose` selects the model tier ("fast" | "chat" | "tailor").
 
         Returns:
             (generated_text, provider_used)
@@ -116,13 +204,14 @@ class AIService:
             provider = await AIService._resolve_provider(user_id, preferred_provider)
 
         api_key = await AIService._get_user_key(user_id, provider)
+        model = _model_for(provider, purpose)
 
         if provider == AIProvider.OPENAI:
-            return await AIService._call_openai(api_key, system_prompt, messages), provider.value
+            return await AIService._call_openai(api_key, system_prompt, messages, model), provider.value
         elif provider == AIProvider.GEMINI:
-            return await AIService._call_gemini(api_key, system_prompt, messages), provider.value
+            return await AIService._call_gemini(api_key, system_prompt, messages, model), provider.value
         elif provider == AIProvider.CLAUDE:
-            return await AIService._call_claude(api_key, system_prompt, messages), provider.value
+            return await AIService._call_claude(api_key, system_prompt, messages, model), provider.value
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported provider")
 
@@ -136,17 +225,21 @@ class AIService:
         system_prompt: str,
         user_prompt: str,
         preferred_provider: Optional[str] = None,
+        purpose: str = "fast",
     ) -> tuple[Dict[str, Any], str]:
         """
         Generate a JSON object. The system prompt must describe the expected
         schema; this method enforces JSON output where the provider supports
         it and robustly parses the response.
 
+        `purpose` selects the model tier ("fast" | "chat" | "tailor").
+
         Returns:
             (parsed_json, provider_used)
         """
         provider = await AIService._resolve_provider(user_id, preferred_provider)
         api_key = await AIService._get_user_key(user_id, provider)
+        model = _model_for(provider, purpose)
 
         json_instruction = (
             "\n\nRespond with ONLY a valid JSON object. No markdown fences, no commentary."
@@ -155,11 +248,11 @@ class AIService:
 
         messages = [{"role": "user", "content": user_prompt}]
         if provider == AIProvider.OPENAI:
-            text = await AIService._call_openai(api_key, system_prompt, messages, json_mode=True)
+            text = await AIService._call_openai(api_key, system_prompt, messages, model, json_mode=True)
         elif provider == AIProvider.GEMINI:
-            text = await AIService._call_gemini(api_key, system_prompt, messages, json_mode=True)
+            text = await AIService._call_gemini(api_key, system_prompt, messages, model, json_mode=True)
         else:
-            text = await AIService._call_claude(api_key, system_prompt, messages)
+            text = await AIService._call_claude(api_key, system_prompt, messages, model)
 
         parsed = AIService.parse_json_response(text)
         if parsed is None:
@@ -230,18 +323,13 @@ class AIService:
         gemini_key = await APIKeyService.get_decrypted_key(user_id, AIProvider.GEMINI)
         if gemini_key:
             try:
-                import google.generativeai as genai
+                from google import genai
 
-                def _embed() -> List[List[float]]:
-                    genai.configure(api_key=gemini_key)
-                    result = genai.embed_content(model=GEMINI_EMBEDDING_MODEL, content=texts)
-                    embedding = result["embedding"]
-                    # Single input returns a flat vector; batch returns a list of vectors
-                    if embedding and isinstance(embedding[0], (int, float)):
-                        return [embedding]
-                    return embedding
-
-                vectors = await asyncio.to_thread(_embed)
+                client = genai.Client(api_key=gemini_key)
+                result = await client.aio.models.embed_content(
+                    model=GEMINI_EMBEDDING_MODEL, contents=texts,
+                )
+                vectors = [e.values for e in result.embeddings]
                 return vectors, AIProvider.GEMINI.value
             except Exception as e:
                 logger.error(f"Gemini embeddings failed: {e}")
@@ -257,6 +345,7 @@ class AIService:
         api_key: str,
         system_prompt: str,
         messages: List[Dict[str, str]],
+        model: str = OPENAI_MODEL,
         json_mode: bool = False,
     ) -> str:
         """Call OpenAI Chat Completions API."""
@@ -266,7 +355,7 @@ class AIService:
             request_messages = [{"role": "system", "content": system_prompt}]
             request_messages.extend(messages)
             kwargs: Dict[str, Any] = {
-                "model": OPENAI_MODEL,
+                "model": model,
                 "messages": request_messages,
                 "max_completion_tokens": DEFAULT_MAX_TOKENS,
             }
@@ -286,29 +375,31 @@ class AIService:
         api_key: str,
         system_prompt: str,
         messages: List[Dict[str, str]],
+        model: str = GEMINI_MODEL,
         json_mode: bool = False,
     ) -> str:
         """Call Google Gemini API."""
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
 
-            def _generate() -> str:
-                genai.configure(api_key=api_key)
-                generation_config = {"response_mime_type": "application/json"} if json_mode else None
-                model = genai.GenerativeModel(
-                    model_name=GEMINI_MODEL,
-                    system_instruction=system_prompt,
-                    generation_config=generation_config,
+            client = genai.Client(api_key=api_key)
+            # Gemini uses "model" for assistant turns
+            contents = [
+                types.Content(
+                    role="model" if m["role"] == "assistant" else "user",
+                    parts=[types.Part.from_text(text=m["content"])],
                 )
-                # Gemini uses "model" for assistant turns
-                history = [
-                    {"role": "model" if m["role"] == "assistant" else "user", "parts": [m["content"]]}
-                    for m in messages
-                ]
-                response = model.generate_content(history)
-                return response.text
-
-            return await asyncio.to_thread(_generate)
+                for m in messages
+            ]
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                response_mime_type="application/json" if json_mode else None,
+            )
+            response = await client.aio.models.generate_content(
+                model=model, contents=contents, config=config,
+            )
+            return response.text or ""
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             raise HTTPException(
@@ -321,13 +412,14 @@ class AIService:
         api_key: str,
         system_prompt: str,
         messages: List[Dict[str, str]],
+        model: str = CLAUDE_MODEL,
     ) -> str:
         """Call Anthropic Claude API."""
         try:
             from anthropic import AsyncAnthropic
             client = AsyncAnthropic(api_key=api_key)
             response = await client.messages.create(
-                model=CLAUDE_MODEL,
+                model=model,
                 max_tokens=DEFAULT_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 system=system_prompt,

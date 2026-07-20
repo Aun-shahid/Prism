@@ -14,7 +14,12 @@ logger = get_logger("api_key_service")
 class APIKeyService:
     @staticmethod
     async def store_key(user_id: str, data: APIKeyCreateRequest) -> APIKeyDocument:
-        """Encrypt and store an API key. Upserts if provider already exists for user."""
+        """Verify, encrypt, and store an API key. Upserts if provider already exists for user."""
+        # Local import: ai_service imports APIKeyService, so a module-level import
+        # here would be circular.
+        from .ai_service import AIService
+        await AIService.validate_key(data.provider, data.api_key)
+
         collection = get_api_keys_collection()
         encrypted = encrypt_value(data.api_key)
         now = datetime.utcnow()

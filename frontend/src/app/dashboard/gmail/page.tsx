@@ -28,6 +28,8 @@ import {
   ListItem,
   ListItemText,
   Chip,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import GoogleIcon from '@mui/icons-material/Google';
 import SendIcon from '@mui/icons-material/Send';
@@ -50,6 +52,7 @@ export default function GmailPage() {
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [tab, setTab] = React.useState(0);
 
   // Reflect the OAuth callback's redirect (?gmail=connected|error) as an alert,
   // then strip it from the URL so a refresh doesn't re-show it.
@@ -224,10 +227,6 @@ export default function GmailPage() {
       {error && <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
 
-      {/* AI apply-by-email + inbound HR replies */}
-      <ApplyByEmail status={status} onSent={loadData} />
-      <HrReplies status={status} />
-
       {!status?.is_connected ? (
         /* Not Connected View */
         <Card sx={{ textAlign: 'center', py: 6, mb: 4 }}>
@@ -237,14 +236,14 @@ export default function GmailPage() {
             <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 500, mx: 'auto', mb: 4 }}>
               Unlock the outreach center. Link your Google account securely to draft and mail personalized cover letters directly to recruiters from the dashboard.
             </Typography>
-            <Button 
-              variant="contained" 
+            <Button
+              variant="contained"
               startIcon={<GoogleIcon />}
               onClick={handleConnect}
-              sx={{ 
-                bgcolor: '#db4437', 
+              sx={{
+                bgcolor: '#db4437',
                 color: '#fff',
-                px: 3, 
+                px: 3,
                 py: 1.2,
                 '&:hover': { bgcolor: '#c53727' }
               }}
@@ -254,152 +253,168 @@ export default function GmailPage() {
           </CardContent>
         </Card>
       ) : (
-        /* Connected Workspace */
-        <Grid container spacing={3}>
-          {/* Left panel: Compose Form */}
-          <Grid size={{ xs: 12, md: 7 }}>
-            <Card>
-              <CardContent sx={{ p: 3 }}>
-                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                  <Box>
-                    <Typography variant="h6" sx={{ fontWeight: 700 }}>Compose Outreach</Typography>
-                    <Typography variant="caption" sx={{ color: 'secondary.main' }}>
-                      Connected as: {status.google_email}
-                    </Typography>
-                  </Box>
-                  <Button 
-                    variant="outlined" 
-                    color="error" 
-                    size="small"
-                    startIcon={<LinkOffIcon />}
-                    onClick={handleDisconnect}
-                  >
-                    Disconnect
-                  </Button>
-                </Stack>
+        <>
+          {/* Slim connection status bar */}
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="caption" sx={{ color: 'secondary.main' }}>
+              Connected as: {status.google_email}
+            </Typography>
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              startIcon={<LinkOffIcon />}
+              onClick={handleDisconnect}
+            >
+              Disconnect
+            </Button>
+          </Stack>
 
-                <Box component="form" onSubmit={handleSendEmail}>
-                  <Stack spacing={3}>
-                    <FormControl fullWidth>
-                      <InputLabel id="outreach-app-label">Recruiter for Job</InputLabel>
-                      <Select
-                        labelId="outreach-app-label"
-                        label="Recruiter for Job"
-                        value={selectedAppId}
-                        onChange={(e) => handleAppChange(e.target.value)}
-                      >
-                        <MenuItem value="">-- Select Application --</MenuItem>
-                        {applications.map(app => (
-                          <MenuItem key={app.id} value={app.id}>
-                            {app.company} - {app.position}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+          <Tabs
+            value={tab}
+            onChange={(_e, v) => setTab(v)}
+            sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Apply by Email" sx={{ textTransform: 'none', fontWeight: 600 }} />
+            <Tab label="HR Replies" sx={{ textTransform: 'none', fontWeight: 600 }} />
+            <Tab label="Compose & History" sx={{ textTransform: 'none', fontWeight: 600 }} />
+          </Tabs>
 
-                    <TextField
-                      label="Recipient Recruiter Email"
-                      value={recipient}
-                      onChange={(e) => setRecipient(e.target.value)}
-                      placeholder="recruiter@company.com"
-                      required
-                      fullWidth
-                    />
+          {tab === 0 && <ApplyByEmail status={status} onSent={loadData} />}
+          {tab === 1 && <HrReplies status={status} />}
 
-                    <TextField
-                      label="Subject"
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      placeholder="E.g. Software Engineer Application - John Doe"
-                      required
-                      fullWidth
-                    />
+          {tab === 2 && (
+            <Grid container spacing={3}>
+              {/* Left panel: Compose Form */}
+              <Grid size={{ xs: 12, md: 7 }}>
+                <Card>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 3 }}>Compose Outreach</Typography>
 
-                    <TextField
-                      label="Email Body (Plain Text or HTML)"
-                      value={body}
-                      onChange={(e) => setBody(e.target.value)}
-                      placeholder="Draft your recruiter note or paste your tailored cover letter..."
-                      multiline
-                      rows={12}
-                      required
-                      fullWidth
-                    />
+                    <Box component="form" onSubmit={handleSendEmail}>
+                      <Stack spacing={3}>
+                        <FormControl fullWidth>
+                          <InputLabel id="outreach-app-label">Recruiter for Job</InputLabel>
+                          <Select
+                            labelId="outreach-app-label"
+                            label="Recruiter for Job"
+                            value={selectedAppId}
+                            onChange={(e) => handleAppChange(e.target.value)}
+                          >
+                            <MenuItem value="">-- Select Application --</MenuItem>
+                            {applications.map(app => (
+                              <MenuItem key={app.id} value={app.id}>
+                                {app.company} - {app.position}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
 
-                    <Button 
-                      type="submit" 
-                      variant="contained" 
-                      startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
-                      disabled={sending || !recipient.trim() || !subject.trim() || !body.trim()}
-                      sx={{ py: 1.5 }}
-                    >
-                      {sending ? 'Sending Outreach Email...' : 'Send Outreach Email'}
-                    </Button>
-                  </Stack>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+                        <TextField
+                          label="Recipient Recruiter Email"
+                          value={recipient}
+                          onChange={(e) => setRecipient(e.target.value)}
+                          placeholder="recruiter@company.com"
+                          required
+                          fullWidth
+                        />
 
-          {/* Right panel: Sent History logs */}
-          <Grid size={{ xs: 12, md: 5 }}>
-            <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <CardContent sx={{ p: 3, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
-                  <HistoryIcon />
-                  <Typography variant="h6" sx={{ fontWeight: 700 }}>Sent Outreach History</Typography>
-                </Stack>
-                <Divider sx={{ mb: 2 }} />
+                        <TextField
+                          label="Subject"
+                          value={subject}
+                          onChange={(e) => setSubject(e.target.value)}
+                          placeholder="E.g. Software Engineer Application - John Doe"
+                          required
+                          fullWidth
+                        />
 
-                <Box sx={{ overflowY: 'auto', flexGrow: 1, maxHeight: '60vh' }}>
-                  {logs.length === 0 ? (
-                    <Stack spacing={1} sx={{ alignItems: 'center', py: 6, color: 'text.secondary' }}>
-                      <InfoIcon />
-                      <Typography variant="body2">No emails sent yet from Prism.</Typography>
+                        <TextField
+                          label="Email Body (Plain Text or HTML)"
+                          value={body}
+                          onChange={(e) => setBody(e.target.value)}
+                          placeholder="Draft your recruiter note or paste your tailored cover letter..."
+                          multiline
+                          rows={12}
+                          required
+                          fullWidth
+                        />
+
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
+                          disabled={sending || !recipient.trim() || !subject.trim() || !body.trim()}
+                          sx={{ py: 1.5 }}
+                        >
+                          {sending ? 'Sending Outreach Email...' : 'Send Outreach Email'}
+                        </Button>
+                      </Stack>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Right panel: Sent History logs */}
+              <Grid size={{ xs: 12, md: 5 }}>
+                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <CardContent sx={{ p: 3, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
+                      <HistoryIcon />
+                      <Typography variant="h6" sx={{ fontWeight: 700 }}>Sent Outreach History</Typography>
                     </Stack>
-                  ) : (
-                    <List dense>
-                      {logs.map((log) => {
-                        const app = applications.find(a => a.id === log.application_id);
-                        return (
-                          <Paper key={log.id} sx={{ p: 2, mb: 1.5, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                            <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 0.5 }}>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                                To: {log.to}
-                              </Typography>
-                              <Chip 
-                                label={log.status.toUpperCase()} 
-                                size="small" 
-                                color={log.status === 'sent' ? 'success' : 'error'}
-                                sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
-                              />
-                            </Stack>
-                            <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: 'text.primary', mb: 0.5 }}>
-                              {log.subject}
-                            </Typography>
-                            {app && (
-                              <Typography variant="caption" sx={{ color: 'primary.main', display: 'block' }}>
-                                Linked job: {app.company}
-                              </Typography>
-                            )}
-                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
-                              Sent: {new Date(log.sent_at).toLocaleString()}
-                            </Typography>
-                            {log.error_message && (
-                              <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 0.5 }}>
-                                Error: {log.error_message}
-                              </Typography>
-                            )}
-                          </Paper>
-                        );
-                      })}
-                    </List>
-                  )}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+                    <Divider sx={{ mb: 2 }} />
+
+                    <Box sx={{ overflowY: 'auto', flexGrow: 1, maxHeight: '60vh' }}>
+                      {logs.length === 0 ? (
+                        <Stack spacing={1} sx={{ alignItems: 'center', py: 6, color: 'text.secondary' }}>
+                          <InfoIcon />
+                          <Typography variant="body2">No emails sent yet from Prism.</Typography>
+                        </Stack>
+                      ) : (
+                        <List dense>
+                          {logs.map((log) => {
+                            const app = applications.find(a => a.id === log.application_id);
+                            return (
+                              <Paper key={log.id} sx={{ p: 2, mb: 1.5, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 0.5 }}>
+                                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                                    To: {log.to}
+                                  </Typography>
+                                  <Chip
+                                    label={log.status.toUpperCase()}
+                                    size="small"
+                                    color={log.status === 'sent' ? 'success' : 'error'}
+                                    sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
+                                  />
+                                </Stack>
+                                <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: 'text.primary', mb: 0.5 }}>
+                                  {log.subject}
+                                </Typography>
+                                {app && (
+                                  <Typography variant="caption" sx={{ color: 'primary.main', display: 'block' }}>
+                                    Linked job: {app.company}
+                                  </Typography>
+                                )}
+                                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
+                                  Sent: {new Date(log.sent_at).toLocaleString()}
+                                </Typography>
+                                {log.error_message && (
+                                  <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 0.5 }}>
+                                    Error: {log.error_message}
+                                  </Typography>
+                                )}
+                              </Paper>
+                            );
+                          })}
+                        </List>
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          )}
+        </>
       )}
     </Box>
   );

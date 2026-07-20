@@ -2,8 +2,9 @@
 Web research tools used by the AI assistant and the watchlist.
 
 Provider-agnostic: search runs through DuckDuckGo (ddgs) and page fetching
-through httpx + BeautifulSoup, so research works no matter which AI provider
-key the user has configured.
+through curl_cffi (TLS/JA3 browser impersonation — see stealth_http.py) +
+BeautifulSoup, so research works no matter which AI provider key the user
+has configured.
 """
 
 import asyncio
@@ -11,22 +12,14 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, status
 
 from .ai_service import AIService
 from .logging_service import get_logger
+from .stealth_http import new_session
 
 logger = get_logger("web_research")
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-}
 
 FETCH_TIMEOUT = 15.0
 
@@ -99,9 +92,7 @@ class WebResearchService:
         {"text": ..., "url": absolute_url}. Returns ("", []) on failure.
         """
         try:
-            async with httpx.AsyncClient(
-                headers=HEADERS, timeout=FETCH_TIMEOUT, follow_redirects=True
-            ) as client:
+            async with new_session(timeout=FETCH_TIMEOUT) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 content_type = response.headers.get("content-type", "")
@@ -184,12 +175,15 @@ class WebResearchService:
         company_name: str,
         preferred_provider: Optional[str] = None,
         steps: Optional[List[Dict[str, Any]]] = None,
+        known_career_url: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], List[str]]:
         """
         Research a company end-to-end:
           1. Web search for the company
           2. Identify + fetch its official website
-          3. Discover careers/jobs page URLs (search + homepage links)
+          3. Discover careers/jobs page URLs (search + homepage links) — SKIPPED
+             if `known_career_url` is given; that URL is honored exactly instead
+             of letting the AI search for and guess at one.
           4. Summarize everything into a structured brief via the user's LLM
 
         `steps` (optional) collects progress entries for the UI agent trace.
@@ -226,10 +220,15 @@ class WebResearchService:
             if homepage_text:
                 sources.append(website)
 
-        note("Locating careers page")
-        careers_candidates = await WebResearchService.discover_careers_urls(
-            company_name, homepage_links
-        )
+        known_career_url = (known_career_url or "").strip() or None
+        if known_career_url:
+            note("Using the provided careers URL", known_career_url)
+            careers_candidates = [known_career_url]
+        else:
+            note("Locating careers page")
+            careers_candidates = await WebResearchService.discover_careers_urls(
+                company_name, homepage_links
+            )
 
         careers_text = ""
         if careers_candidates:
@@ -277,7 +276,7 @@ class WebResearchService:
 
         try:
             brief, _provider = await AIService.generate_json(
-                user_id, system_prompt, user_prompt, preferred_provider=preferred_provider
+                user_id, system_prompt, user_prompt, preferred_provider=preferred_provider, purpose="chat"
             )
         except HTTPException:
             raise
@@ -292,6 +291,12 @@ class WebResearchService:
             brief["careers_url"] = careers_candidates[0]
         brief.setdefault("jobs_url", brief.get("careers_url"))
         brief["careers_candidates"] = careers_candidates
+
+        # A user-supplied URL is an assertion, not a suggestion — honor it exactly
+        # regardless of what the AI's summary happened to echo back.
+        if known_career_url:
+            brief["careers_url"] = known_career_url
+            brief["jobs_url"] = known_career_url
 
         for result in general_results[:4]:
             if result["url"] not in sources:
