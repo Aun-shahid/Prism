@@ -1,6 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
-from ..models.scraper import ScrapedJobResponse
+from ..models.scraper import PaginatedScrapedJobsResponse, ScrapedJobResponse
 from ..models.applications import ApplicationResponse
 from ..models.jobs import ExternalSearchRequest, JobImportRequest
 from ..models.users import User
@@ -9,21 +9,24 @@ from ..auth.dependencies import get_current_active_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-@router.get("", response_model=List[ScrapedJobResponse])
+@router.get("", response_model=PaginatedScrapedJobsResponse)
 async def list_jobs(
     search: Optional[str] = Query(None),
     is_new: Optional[bool] = Query(None),
     target_id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List scraped/discovered jobs with filtering."""
-    jobs = await JobService.list_jobs(
+    """List scraped/discovered jobs with filtering and pagination."""
+    return await JobService.list_jobs(
         user_id=current_user.id,
         search=search,
         is_new=is_new,
-        target_id=target_id
+        target_id=target_id,
+        page=page,
+        limit=limit,
     )
-    return jobs
 
 @router.patch("/{job_id}/read", response_model=ScrapedJobResponse)
 async def mark_job_read(

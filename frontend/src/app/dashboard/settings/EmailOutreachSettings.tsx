@@ -8,8 +8,12 @@ import {
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
-import { emailSettingsService, EmailSettings } from '../../../services/emailSettings';
-import { resumeVersionApi, ResumeVersion } from '../../../services/resumeBuilder';
+import { EmailSettings } from '../../../services/emailSettings';
+import {
+  useGetEmailSettingsQuery,
+  useGetResumeVersionsQuery,
+  useUpdateEmailSettingsMutation,
+} from '../../../store/prismApi';
 
 const DEFAULTS: EmailSettings = {
   custom_instructions: '', tone: 'warm', length: 'short', signature: '', sender_name: '',
@@ -19,46 +23,35 @@ const DEFAULTS: EmailSettings = {
 };
 
 export default function EmailOutreachSettings() {
+  const { data: serverSettings, isLoading: loading } = useGetEmailSettingsQuery();
+  const { data: versions = [] } = useGetResumeVersionsQuery();
+  const [updateEmailSettings, { isLoading: saving }] = useUpdateEmailSettingsMutation();
+
   const [s, setS] = React.useState<EmailSettings>(DEFAULTS);
-  const [versions, setVersions] = React.useState<ResumeVersion[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [ok, setOk] = React.useState<string | null>(null);
 
+  // Seed the local form once the cached settings arrive
+  const seededRef = React.useRef(false);
   React.useEffect(() => {
-    (async () => {
-      try {
-        const [data, vs] = await Promise.all([
-          emailSettingsService.get(),
-          resumeVersionApi.getAll().catch(() => [] as ResumeVersion[]),
-        ]);
-        setS({ ...DEFAULTS, ...data });
-        setVersions(vs);
-      } catch {
-        /* keep defaults */
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+    if (seededRef.current || !serverSettings) return;
+    seededRef.current = true;
+    setS({ ...DEFAULTS, ...serverSettings });
+  }, [serverSettings]);
 
   const set = <K extends keyof EmailSettings>(key: K, value: EmailSettings[K]) =>
     setS(prev => ({ ...prev, [key]: value }));
 
   const handleSave = async () => {
-    setSaving(true);
     setError(null);
     setOk(null);
     try {
-      const saved = await emailSettingsService.update(s);
+      const saved = await updateEmailSettings(s).unwrap();
       setS({ ...DEFAULTS, ...saved });
       setOk('Email outreach settings saved.');
     } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const detail = (e as { data?: { detail?: string } })?.data?.detail;
       setError(detail || 'Failed to save settings.');
-    } finally {
-      setSaving(false);
     }
   };
 

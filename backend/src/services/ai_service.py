@@ -256,7 +256,12 @@ class AIService:
 
         parsed = AIService.parse_json_response(text)
         if parsed is None:
-            logger.error(f"Failed to parse JSON from {provider.value} response: {text[:300]}")
+            # Log head AND tail — a cut-off tail is the signature of output-token
+            # truncation, which the head alone can't show.
+            logger.error(
+                f"Failed to parse JSON from {provider.value} response "
+                f"(len={len(text)}): head={text[:200]!r} tail={text[-200:]!r}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The AI returned an unparseable response. Please try again.",
@@ -395,10 +400,20 @@ class AIService:
             config = types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json" if json_mode else None,
+                # Explicit ceiling: thinking models draw reasoning tokens from the
+                # same output budget, and tailor responses (e.g. full-resume
+                # translations) can be very large. Without this the server-side
+                # default applies and long JSON payloads get truncated mid-string.
+                max_output_tokens=65536,
             )
             response = await client.aio.models.generate_content(
                 model=model, contents=contents, config=config,
             )
+            finish_reason = getattr(
+                (response.candidates or [None])[0], "finish_reason", None
+            ) if getattr(response, "candidates", None) else None
+            if finish_reason is not None and "STOP" not in str(finish_reason):
+                logger.warning(f"Gemini finished with reason {finish_reason} (model={model})")
             return response.text or ""
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")

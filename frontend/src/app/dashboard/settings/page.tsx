@@ -2,100 +2,88 @@
 
 import * as React from 'react';
 import { useAuth } from '../../../hooks/useAuth';
-import { useApiKeys } from '../../../hooks/useApiKeys';
 import { usersService } from '../../../services/users';
-import { apiKeysService, APIKey } from '../../../services/apiKeys';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Grid,
-  TextField,
-  Button,
-  Stack,
-  Alert,
-  CircularProgress,
-  Divider,
-  Paper,
-  IconButton,
-  Switch,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  List,
-  Tabs,
-  Tab,
-} from '@mui/material';
+import type { APIKey } from '../../../services/apiKeys';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import FormControl from '@mui/material/FormControl';
+import Grid from '@mui/material/Grid';
+import IconButton from '@mui/material/IconButton';
+import InputLabel from '@mui/material/InputLabel';
+import List from '@mui/material/List';
+import MenuItem from '@mui/material/MenuItem';
+import Paper from '@mui/material/Paper';
+import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import KeyIcon from '@mui/icons-material/Key';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
+import LanguageIcon from '@mui/icons-material/Language';
 import EmailOutreachSettings from './EmailOutreachSettings';
+import GoogleTranslate from '../../../components/GoogleTranslate';
+import {
+  useDeleteApiKeyMutation,
+  useGetApiKeysQuery,
+  useStoreApiKeyMutation,
+  useToggleApiKeyMutation,
+} from '../../../store/prismApi';
+import { useAppDispatch } from '../../../store/hooks';
+import { showToast } from '../../../store/uiSlice';
+import PageHeader from '../../../components/ui/PageHeader';
+import { useConfirm } from '../../../components/ui/ConfirmDialog';
 
 export default function SettingsPage() {
   const { user, checkAuth } = useAuth();
-  const { refresh: refreshApiKeys } = useApiKeys();
+  const dispatch = useAppDispatch();
+  const confirm = useConfirm();
   const isAdmin = user?.role === 'super_admin';
 
-  // Tabs — admins only ever see Account (API Keys / Email Outreach are hidden for them below too).
   const [tab, setTab] = React.useState(0);
 
-  // Settings states
-  const [keys, setKeys] = React.useState<APIKey[]>([]);
-  const [loadingKeys, setLoadingKeys] = React.useState(true);
+  // API keys — shared RTK cache (also feeds useApiKeys/NoApiKeyTooltip)
+  const { data: keys = [], isLoading: loadingKeys } = useGetApiKeysQuery();
+  const [storeApiKey, { isLoading: savingKey }] = useStoreApiKeyMutation();
+  const [toggleApiKey] = useToggleApiKeyMutation();
+  const [deleteApiKey] = useDeleteApiKeyMutation();
 
-  // Account forms
+  // Account form
   const [name, setName] = React.useState(user?.name || '');
   const [username, setUsername] = React.useState(user?.username || '');
   const [email, setEmail] = React.useState(user?.email || '');
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [savingAccount, setSavingAccount] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
-  // Dialog state for adding a key
+  // Add-key dialog
   const [openKeyDialog, setOpenKeyDialog] = React.useState(false);
   const [keyForm, setKeyForm] = React.useState({
     provider: 'openai' as 'openai' | 'gemini' | 'claude',
     api_key: '',
-    label: ''
+    label: '',
   });
-
-  const [savingAccount, setSavingAccount] = React.useState(false);
-  const [savingKey, setSavingKey] = React.useState(false);
   const [keyDialogError, setKeyDialogError] = React.useState<string | null>(null);
 
-  const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
-
-  const loadAPIKeys = React.useCallback(async () => {
-    setLoadingKeys(true);
-    try {
-      const data = await apiKeysService.listKeys();
-      setKeys(data);
-    } catch (err: any) {
-      // Endpoint might fail if offline
-    } finally {
-      setLoadingKeys(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    loadAPIKeys();
-  }, [loadAPIKeys]);
-
-  // Handle Account Info Save
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     setError(null);
-    setSuccess(null);
     setSavingAccount(true);
 
     if (password && password !== confirmPassword) {
@@ -105,86 +93,61 @@ export default function SettingsPage() {
     }
 
     try {
-      const payload: any = {
-        name,
-        username,
-        email,
-      };
-      if (password) {
-        payload.password = password;
-      }
-
+      const payload: Record<string, string> = { name, username, email };
+      if (password) payload.password = password;
       await usersService.updateUser(user.id, payload);
-      setSuccess('Account profile updated successfully.');
+      dispatch(showToast({ message: 'Account profile updated', severity: 'success' }));
       setPassword('');
       setConfirmPassword('');
-      // Refresh Auth Context
       await checkAuth();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update account settings.');
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || 'Failed to update account settings.');
     } finally {
       setSavingAccount(false);
     }
   };
 
-  // --- API Key Handlers ---
   const handleToggleKey = async (key: APIKey) => {
     try {
-      const nextActive = !key.is_active;
-      await apiKeysService.toggleKey(key.id, nextActive);
-      setKeys(prev => prev.map(k => {
-        if (k.id === key.id) {
-          return { ...k, is_active: nextActive };
-        }
-        if (nextActive) {
-          // If we activated a key, deactivate all others
-          return { ...k, is_active: false };
-        }
-        return k;
-      }));
-      await refreshApiKeys();
-    } catch (err: any) {
-      alert('Failed to toggle API key status.');
+      await toggleApiKey({ keyId: key.id, isActive: !key.is_active }).unwrap();
+    } catch {
+      dispatch(showToast({ message: 'Failed to toggle API key status', severity: 'error' }));
     }
   };
 
-  const handleDeleteKey = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this API key?')) return;
+  const handleDeleteKey = async (key: APIKey) => {
+    const ok = await confirm({
+      title: 'Delete this API key?',
+      body: `The ${key.provider.toUpperCase()} key will be removed. AI features using it will stop working.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
-      await apiKeysService.deleteKey(id);
-      setKeys(prev => prev.filter(k => k.id !== id));
-      await refreshApiKeys();
-    } catch (err: any) {
-      alert('Failed to delete API key.');
+      await deleteApiKey(key.id).unwrap();
+      dispatch(showToast({ message: 'API key deleted', severity: 'success' }));
+    } catch {
+      dispatch(showToast({ message: 'Failed to delete API key', severity: 'error' }));
     }
   };
 
   const handleSaveKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!keyForm.api_key.trim()) return;
-    setSavingKey(true);
     setKeyDialogError(null);
     try {
-      const newKey = await apiKeysService.storeKey({
+      await storeApiKey({
         provider: keyForm.provider,
         api_key: keyForm.api_key.trim(),
-        label: keyForm.label.trim() || undefined
-      });
-      setKeys(prev => {
-        // Remove old key for same provider, and deactivate all others (since new key is active)
-        const filtered = prev
-          .filter(k => k.provider !== keyForm.provider)
-          .map(k => ({ ...k, is_active: false }));
-        return [...filtered, newKey];
-      });
-      await refreshApiKeys();
+        label: keyForm.label.trim() || undefined,
+      }).unwrap();
       setOpenKeyDialog(false);
       setKeyForm({ provider: 'openai', api_key: '', label: '' });
-      setSuccess('API key verified and configured successfully.');
-    } catch (err: any) {
-      setKeyDialogError(err.response?.data?.detail || 'Failed to configure API key.');
-    } finally {
-      setSavingKey(false);
+      dispatch(showToast({ message: 'API key verified and configured', severity: 'success' }));
+    } catch (err) {
+      const detail = (err as { data?: { detail?: string } })?.data?.detail;
+      setKeyDialogError(detail || 'Failed to configure API key.');
     }
   };
 
@@ -198,50 +161,33 @@ export default function SettingsPage() {
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-          Workspace Settings
-        </Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          Manage your personal details, credentials, and encrypted third-party API configurations.
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Workspace Settings"
+        subtitle="Manage your personal details, credentials, and encrypted third-party API configurations."
+      />
 
-      {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
-      {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
-      <Tabs
-        value={tab}
-        onChange={(_e, v) => setTab(v)}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
+      <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         {tabs.map((t, i) => (
-          <Tab key={i} label={t.label} icon={t.icon} iconPosition="start" sx={{ minHeight: 48, textTransform: 'none', fontWeight: 600 }} />
+          <Tab key={i} label={t.label} icon={t.icon} iconPosition="start" sx={{ minHeight: 48 }} />
         ))}
       </Tabs>
 
-      {/* --- Account --- */}
+      {/* Account */}
       {tab === 0 && (
-        <Grid container>
+        <Grid container spacing={2.5}>
           <Grid size={{ xs: 12, md: 8, lg: 6 }}>
             <Card>
               <CardContent sx={{ p: 3 }}>
                 <Box component="form" onSubmit={handleSaveAccount}>
                   <Stack spacing={3}>
-                    <TextField
-                      label="Full Name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                      fullWidth
-                    />
-                    <TextField
-                      label="Username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      required
-                      fullWidth
-                    />
+                    <TextField label="Full Name" value={name} onChange={(e) => setName(e.target.value)} required fullWidth />
+                    <TextField label="Username" value={username} onChange={(e) => setUsername(e.target.value)} required fullWidth />
                     <TextField
                       label="Email Address"
                       type="email"
@@ -284,10 +230,25 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </Grid>
+
+          <Grid size={{ xs: 12, md: 4, lg: 4 }}>
+            <Card>
+              <CardContent sx={{ p: 3 }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
+                  <LanguageIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                  <Typography variant="h6">Language</Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                  Translate the app interface. Your choice persists across pages.
+                </Typography>
+                <GoogleTranslate />
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
       )}
 
-      {/* --- API Keys --- */}
+      {/* API Keys */}
       {tab === 1 && !isAdmin && (
         <Grid container>
           <Grid size={{ xs: 12, md: 8, lg: 6 }}>
@@ -303,18 +264,37 @@ export default function SettingsPage() {
                 </Stack>
 
                 {loadingKeys ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={30} /></Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                    <CircularProgress size={30} />
+                  </Box>
                 ) : keys.length === 0 ? (
-                  <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary', border: '1px dashed rgba(255,255,255,0.08)' }}>
+                  <Paper
+                    sx={{
+                      p: 4,
+                      textAlign: 'center',
+                      color: 'text.secondary',
+                      border: '1px dashed',
+                      borderColor: 'divider',
+                    }}
+                  >
                     No API keys configured yet. AI tools require at least one provider key.
                   </Paper>
                 ) : (
                   <List>
                     {keys.map((k) => (
-                      <Paper key={k.id} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <Paper
+                        key={k.id}
+                        sx={{
+                          p: 2,
+                          mb: 2,
+                          bgcolor: 'rgba(15, 23, 42, 0.01)',
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      >
                         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                           <Box>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                               {k.provider.toUpperCase()}
                             </Typography>
                             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -323,12 +303,8 @@ export default function SettingsPage() {
                           </Box>
 
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                            <Switch
-                              checked={k.is_active}
-                              onChange={() => handleToggleKey(k)}
-                              size="small"
-                            />
-                            <IconButton size="small" color="error" onClick={() => handleDeleteKey(k.id)}>
+                            <Switch checked={k.is_active} onChange={() => handleToggleKey(k)} size="small" />
+                            <IconButton size="small" color="error" onClick={() => handleDeleteKey(k)}>
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </Stack>
@@ -343,23 +319,32 @@ export default function SettingsPage() {
         </Grid>
       )}
 
-      {/* --- Email Outreach --- */}
+      {/* Email Outreach */}
       {tab === 2 && !isAdmin && <EmailOutreachSettings />}
 
-      {/* Configure Key Dialog */}
+      {/* Configure key dialog */}
       <Dialog open={openKeyDialog} onClose={() => setOpenKeyDialog(false)} fullWidth maxWidth="xs">
         <Box component="form" onSubmit={handleSaveKey}>
-          <DialogTitle sx={{ fontWeight: 800 }}>Add AI Provider Key</DialogTitle>
+          <DialogTitle>Add AI Provider Key</DialogTitle>
           <DialogContent dividers>
             <Stack spacing={3} sx={{ mt: 1 }}>
-              {keyDialogError && <Alert severity="error" onClose={() => setKeyDialogError(null)}>{keyDialogError}</Alert>}
+              {keyDialogError && (
+                <Alert severity="error" onClose={() => setKeyDialogError(null)}>
+                  {keyDialogError}
+                </Alert>
+              )}
               <FormControl fullWidth>
                 <InputLabel id="provider-select-label">AI Provider</InputLabel>
                 <Select
                   labelId="provider-select-label"
                   label="AI Provider"
                   value={keyForm.provider}
-                  onChange={(e) => setKeyForm(prev => ({ ...prev, provider: e.target.value as any }))}
+                  onChange={(e) =>
+                    setKeyForm((prev) => ({
+                      ...prev,
+                      provider: e.target.value as 'openai' | 'gemini' | 'claude',
+                    }))
+                  }
                 >
                   <MenuItem value="openai">OpenAI (GPT-4 / ChatGPT)</MenuItem>
                   <MenuItem value="gemini">Google Gemini</MenuItem>
@@ -372,7 +357,7 @@ export default function SettingsPage() {
                 type="password"
                 placeholder="sk-..."
                 value={keyForm.api_key}
-                onChange={(e) => setKeyForm(prev => ({ ...prev, api_key: e.target.value }))}
+                onChange={(e) => setKeyForm((prev) => ({ ...prev, api_key: e.target.value }))}
                 required
                 fullWidth
               />
@@ -381,7 +366,7 @@ export default function SettingsPage() {
                 label="Key Label (Optional)"
                 placeholder="e.g. My Personal OpenAI Key"
                 value={keyForm.label}
-                onChange={(e) => setKeyForm(prev => ({ ...prev, label: e.target.value }))}
+                onChange={(e) => setKeyForm((prev) => ({ ...prev, label: e.target.value }))}
                 fullWidth
               />
             </Stack>

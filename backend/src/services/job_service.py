@@ -17,17 +17,19 @@ class JobService:
         search: Optional[str] = None,
         is_new: Optional[bool] = None,
         target_id: Optional[str] = None,
-    ) -> List[ScrapedJob]:
-        """List all scraped jobs with filtering and search."""
+        page: int = 1,
+        limit: int = 25,
+    ) -> dict:
+        """List scraped jobs with filtering, search and pagination."""
         collection = get_scraped_jobs_collection()
         query = {"user_id": user_id}
-        
+
         if is_new is not None:
             query["is_new"] = is_new
-            
+
         if target_id:
             query["target_id"] = target_id
-            
+
         if search:
             # Simple regex search across title, url, snippet or keywords
             regex = {"$regex": search, "$options": "i"}
@@ -37,13 +39,29 @@ class JobService:
                 {"description_snippet": regex},
                 {"matched_keywords": regex}
             ]
-            
-        cursor = collection.find(query).sort("discovered_at", -1)
+
+        total = await collection.count_documents(query)
+        cursor = (
+            collection.find(query)
+            .sort("discovered_at", -1)
+            .skip((page - 1) * limit)
+            .limit(limit)
+        )
         jobs = []
         async for doc in cursor:
             doc["_id"] = str(doc["_id"])
             jobs.append(ScrapedJob(**doc))
-        return jobs
+
+        import math
+        pages = math.ceil(total / limit) if limit > 0 else 1
+
+        return {
+            "jobs": jobs,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages,
+        }
 
     @staticmethod
     async def import_to_applications(

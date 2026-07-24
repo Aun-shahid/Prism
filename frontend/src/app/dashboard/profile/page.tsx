@@ -12,6 +12,9 @@ import {
 import { useApiKeys } from '../../../hooks/useApiKeys';
 import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
 import { titlesService } from '../../../services/titles';
+import { prismApi, useGetProfileQuery } from '../../../store/prismApi';
+import { useAppDispatch } from '../../../store/hooks';
+import { useConfirm } from '../../../components/ui/ConfirmDialog';
 import {
   Box,
   Typography,
@@ -58,9 +61,10 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 
 export default function ProfilePage() {
   const { hasActiveKey } = useApiKeys();
+  const dispatch = useAppDispatch();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = React.useState(0);
   const [profile, setProfile] = React.useState<UserProfile | null>(null);
-  const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
@@ -151,31 +155,38 @@ export default function ProfilePage() {
     portfolio_url: '',
   });
 
-  const fetchProfile = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await profileService.getProfile();
-      setProfile(data);
-      setBasicForm({
-        headline: data.headline || '',
-        summary: data.summary || '',
-        phone: data.phone || '',
-        location: data.location || '',
-        linkedin_url: data.linkedin_url || '',
-        github_url: data.github_url || '',
-        portfolio_url: data.portfolio_url || '',
-      });
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load profile details');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Profile comes from the shared RTK Query cache (deduped with jobs/resume pages)
+  const { data: cachedProfile, isLoading: loading, isError: loadError } = useGetProfileQuery();
+
+  // Seed local editing state once when the cache first resolves
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seededRef.current || !cachedProfile) return;
+    seededRef.current = true;
+    setProfile(cachedProfile);
+    setBasicForm({
+      headline: cachedProfile.headline || '',
+      summary: cachedProfile.summary || '',
+      phone: cachedProfile.phone || '',
+      location: cachedProfile.location || '',
+      linkedin_url: cachedProfile.linkedin_url || '',
+      github_url: cachedProfile.github_url || '',
+      portfolio_url: cachedProfile.portfolio_url || '',
+    });
+  }, [cachedProfile]);
 
   React.useEffect(() => {
-    fetchProfile();
-  }, [fetchProfile]);
+    if (loadError) setError('Failed to load profile details');
+  }, [loadError]);
+
+  // Mirror every mutation result into both local state and the shared cache
+  const syncProfile = React.useCallback(
+    (updated: UserProfile) => {
+      setProfile(updated);
+      dispatch(prismApi.util.upsertQueryData('getProfile', undefined, updated));
+    },
+    [dispatch]
+  );
 
   const handleSaveBasic = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,7 +195,7 @@ export default function ProfilePage() {
     setError(null);
     try {
       const updated = await profileService.updateProfile(basicForm);
-      setProfile(updated);
+      syncProfile(updated);
       setSuccess('Profile updated successfully.');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save basic profile details.');
@@ -201,7 +212,7 @@ export default function ProfilePage() {
     try {
       const updatedSkills = [...profile.skills, skill];
       const updated = await profileService.updateSkills(updatedSkills);
-      setProfile(updated);
+      syncProfile(updated);
       setSkillInput('');
     } catch (err: any) {
       setError('Failed to add skill.');
@@ -213,7 +224,7 @@ export default function ProfilePage() {
     try {
       const updatedSkills = profile.skills.filter(s => s !== skillToRemove);
       const updated = await profileService.updateSkills(updatedSkills);
-      setProfile(updated);
+      syncProfile(updated);
     } catch (err: any) {
       setError('Failed to remove skill.');
     }
@@ -227,7 +238,7 @@ export default function ProfilePage() {
     try {
       const updatedTitles = [...(profile.job_titles || []), title];
       const updated = await profileService.updateJobTitles(updatedTitles);
-      setProfile(updated);
+      syncProfile(updated);
       setJobTitleInput('');
     } catch (err: any) {
       setError('Failed to add job title.');
@@ -239,7 +250,7 @@ export default function ProfilePage() {
     try {
       const updatedTitles = (profile.job_titles || []).filter(t => t !== titleToRemove);
       const updated = await profileService.updateJobTitles(updatedTitles);
-      setProfile(updated);
+      syncProfile(updated);
     } catch (err: any) {
       setError('Failed to remove job title.');
     }
@@ -257,7 +268,7 @@ export default function ProfilePage() {
     
     try {
       const updated = await profileService.uploadCV(file);
-      setProfile(updated);
+      syncProfile(updated);
       // Update form values for basic details
       setBasicForm({
         headline: updated.headline || '',
@@ -353,7 +364,7 @@ export default function ProfilePage() {
       const updated = await profileService.updateProfile({
         job_preferences: profile.job_preferences
       });
-      setProfile(updated);
+      syncProfile(updated);
       setSuccess('Job location preferences updated successfully.');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save job preferences.');
@@ -374,12 +385,12 @@ export default function ProfilePage() {
       } else {
         updated = await profileService.addWorkExperience(workForm);
       }
-      setProfile(updated);
+      syncProfile(updated);
       closeItemDialog();
       setWorkForm({ company: '', title: '', location: '', start_date: '', end_date: '', description: '', highlights: [] });
       setHighlightInput('');
     } catch (err: any) {
-      alert('Failed to save work experience.');
+      setError('Failed to save work experience.');
     }
   };
 
@@ -392,12 +403,13 @@ export default function ProfilePage() {
   };
 
   const handleRemoveWork = async (index: number) => {
-    if (!confirm('Are you sure you want to remove this experience?')) return;
+    const ok = await confirm({ title: 'Remove this experience?', confirmLabel: 'Remove', destructive: true });
+    if (!ok) return;
     try {
       const updated = await profileService.removeWorkExperience(index);
-      setProfile(updated);
-    } catch (err: any) {
-      alert('Failed to remove work experience.');
+      syncProfile(updated);
+    } catch {
+      setError('Failed to remove work experience.');
     }
   };
 
@@ -420,11 +432,11 @@ export default function ProfilePage() {
       } else {
         updated = await profileService.addEducation(eduForm);
       }
-      setProfile(updated);
+      syncProfile(updated);
       closeItemDialog();
       setEduForm({ institution: '', degree: '', field_of_study: '', start_date: '', end_date: '', gpa: '', description: '' });
     } catch (err: any) {
-      alert('Failed to save education.');
+      setError('Failed to save education.');
     }
   };
 
@@ -436,12 +448,13 @@ export default function ProfilePage() {
   };
 
   const handleRemoveEdu = async (index: number) => {
-    if (!confirm('Are you sure you want to remove this education entry?')) return;
+    const ok = await confirm({ title: 'Remove this education entry?', confirmLabel: 'Remove', destructive: true });
+    if (!ok) return;
     try {
       const updated = await profileService.removeEducation(index);
-      setProfile(updated);
-    } catch (err: any) {
-      alert('Failed to remove education entry.');
+      syncProfile(updated);
+    } catch {
+      setError('Failed to remove education entry.');
     }
   };
 
@@ -457,12 +470,12 @@ export default function ProfilePage() {
       } else {
         updated = await profileService.addProject(projForm);
       }
-      setProfile(updated);
+      syncProfile(updated);
       closeItemDialog();
       setProjForm({ name: '', description: '', technologies: [], url: '', start_date: '', end_date: '' });
       setTechInput('');
     } catch (err: any) {
-      alert('Failed to save project.');
+      setError('Failed to save project.');
     }
   };
 
@@ -475,12 +488,13 @@ export default function ProfilePage() {
   };
 
   const handleRemoveProj = async (index: number) => {
-    if (!confirm('Are you sure you want to remove this project?')) return;
+    const ok = await confirm({ title: 'Remove this project?', confirmLabel: 'Remove', destructive: true });
+    if (!ok) return;
     try {
       const updated = await profileService.removeProject(index);
-      setProfile(updated);
-    } catch (err: any) {
-      alert('Failed to remove project.');
+      syncProfile(updated);
+    } catch {
+      setError('Failed to remove project.');
     }
   };
 
@@ -503,11 +517,11 @@ export default function ProfilePage() {
       } else {
         updated = await profileService.addCertification(certForm);
       }
-      setProfile(updated);
+      syncProfile(updated);
       closeItemDialog();
       setCertForm({ name: '', issuer: '', date: '', url: '' });
     } catch (err: any) {
-      alert('Failed to save certification.');
+      setError('Failed to save certification.');
     }
   };
 
@@ -519,12 +533,13 @@ export default function ProfilePage() {
   };
 
   const handleRemoveCert = async (index: number) => {
-    if (!confirm('Are you sure you want to remove this certification?')) return;
+    const ok = await confirm({ title: 'Remove this certification?', confirmLabel: 'Remove', destructive: true });
+    if (!ok) return;
     try {
       const updated = await profileService.removeCertification(index);
-      setProfile(updated);
-    } catch (err: any) {
-      alert('Failed to remove certification.');
+      syncProfile(updated);
+    } catch {
+      setError('Failed to remove certification.');
     }
   };
 
@@ -550,8 +565,8 @@ export default function ProfilePage() {
       {/* Upload CV Action Card */}
       <Card sx={{ 
         mb: 4, 
-        background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%)',
-        border: '1px solid rgba(255, 255, 255, 0.08)' 
+        background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.08) 0%, rgba(5, 150, 105, 0.08) 100%)',
+        border: '1px solid rgba(15, 23, 42, 0.08)' 
       }}>
         <CardContent sx={{ p: 3 }}>
           <Stack 
@@ -580,7 +595,7 @@ export default function ProfilePage() {
                   disabled={uploading || !hasActiveKey}
                   startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUploadIcon />}
                   sx={{
-                    background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
+                    background: 'var(--prism-palette-primary-main)',
                     color: '#fff',
                     fontWeight: 700,
                     px: 3,
@@ -748,7 +763,7 @@ export default function ProfilePage() {
                     {w.highlights.length > 0 && (
                       <Box sx={{ mt: 2 }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>Highlights / Key Achievements:</Typography>
-                        <ul style={{ margin: 0, paddingLeft: 20, color: '#9ca3af', fontSize: '0.875rem' }}>
+                        <ul style={{ margin: 0, paddingLeft: 20, color: 'var(--prism-palette-text-secondary)', fontSize: '0.875rem' }}>
                           {w.highlights.map((h, hidx) => (
                             <li key={hidx} style={{ marginBottom: 4 }}>{h}</li>
                           ))}
@@ -789,7 +804,7 @@ export default function ProfilePage() {
                         <Box>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>{p.name}</Typography>
                           {p.url && (
-                            <a href={p.url} target="_blank" rel="noopener noreferrer" style={{ color: '#a78bfa', textDecoration: 'none', fontSize: '0.8rem', fontWeight: 600 }}>
+                            <a href={p.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--prism-palette-primary-main)', textDecoration: 'none', fontSize: '0.8rem', fontWeight: 600 }}>
                               Visit Project Link
                             </a>
                           )}

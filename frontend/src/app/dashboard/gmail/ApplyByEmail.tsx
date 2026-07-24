@@ -11,12 +11,12 @@ import SendIcon from '@mui/icons-material/Send';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { GmailStatus } from '../../../services/gmail';
 import { outreachService, ComposeResult } from '../../../services/outreach';
-import { emailSettingsService, EmailSettings } from '../../../services/emailSettings';
-import { resumeVersionApi, ResumeVersion } from '../../../services/resumeBuilder';
 import { elementToPdfBase64 } from '../../../services/resumeExport';
 import ResumeTemplate from '../resume/ResumeTemplate';
 import { useApiKeys } from '../../../hooks/useApiKeys';
 import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
+import { useGetEmailSettingsQuery, useGetResumeVersionsQuery } from '../../../store/prismApi';
+import { useConfirm } from '../../../components/ui/ConfirmDialog';
 
 interface Props {
   status: GmailStatus | null;
@@ -27,8 +27,9 @@ const AUTO_SEND_SECONDS = 8;
 
 export default function ApplyByEmail({ status, onSent }: Props) {
   const { hasActiveKey } = useApiKeys();
-  const [settings, setSettings] = React.useState<EmailSettings | null>(null);
-  const [versions, setVersions] = React.useState<ResumeVersion[]>([]);
+  const confirm = useConfirm();
+  const { data: settings } = useGetEmailSettingsQuery();
+  const { data: versions = [] } = useGetResumeVersionsQuery();
 
   const [jobDescription, setJobDescription] = React.useState('');
   const [company, setCompany] = React.useState('');
@@ -50,23 +51,14 @@ export default function ApplyByEmail({ status, onSent }: Props) {
 
   const hiddenRef = React.useRef<HTMLDivElement | null>(null);
 
+  // Initialize the attach toggle + preferred version once both caches land
+  const initializedRef = React.useRef(false);
   React.useEffect(() => {
-    (async () => {
-      try {
-        const [s, vs] = await Promise.all([
-          emailSettingsService.get(),
-          resumeVersionApi.getAll().catch(() => [] as ResumeVersion[]),
-        ]);
-        setSettings(s);
-        setAttachResume(s.attach_resume);
-        setVersions(vs);
-        const preferred = s.default_resume_version_id || vs[0]?.id || '';
-        setVersionId(preferred);
-      } catch {
-        /* settings will default server-side; ignore */
-      }
-    })();
-  }, []);
+    if (initializedRef.current || !settings) return;
+    initializedRef.current = true;
+    setAttachResume(settings.attach_resume);
+    setVersionId(settings.default_resume_version_id || versions[0]?.id || '');
+  }, [settings, versions]);
 
   const selectedVersion = versions.find(v => v.id === versionId) || null;
 
@@ -140,7 +132,12 @@ export default function ApplyByEmail({ status, onSent }: Props) {
     } catch (e: unknown) {
       const st = (e as { response?: { status?: number } })?.response?.status;
       if (st === 409) {
-        if (confirm(`You've already emailed ${recipient}. Send anyway?`)) {
+        const proceed = await confirm({
+          title: 'Send anyway?',
+          body: `You've already emailed ${recipient}.`,
+          confirmLabel: 'Send anyway',
+        });
+        if (proceed) {
           await doSend(true);
           return;
         }
@@ -153,7 +150,7 @@ export default function ApplyByEmail({ status, onSent }: Props) {
     } finally {
       setSending(false);
     }
-  }, [buildAttachments, body, recipient, subject, company, position, jobDescription, onSent]);
+  }, [buildAttachments, body, recipient, subject, company, position, jobDescription, onSent, confirm]);
 
   // Auto-send countdown.
   React.useEffect(() => {

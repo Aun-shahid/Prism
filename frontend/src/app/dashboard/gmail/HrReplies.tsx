@@ -11,9 +11,14 @@ import CloseIcon from '@mui/icons-material/Close';
 import ForumIcon from '@mui/icons-material/Forum';
 import { GmailStatus } from '../../../services/gmail';
 import { outreachService, InboundReply } from '../../../services/outreach';
-import { emailSettingsService } from '../../../services/emailSettings';
 import { useApiKeys } from '../../../hooks/useApiKeys';
 import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
+import {
+  prismApi,
+  useGetEmailSettingsQuery,
+  useGetInboundRepliesQuery,
+} from '../../../store/prismApi';
+import { useAppDispatch } from '../../../store/hooks';
 
 interface Props {
   status: GmailStatus | null;
@@ -28,37 +33,25 @@ const CATEGORY_COLOR: Record<string, 'success' | 'info' | 'default' | 'warning'>
 
 export default function HrReplies({ status }: Props) {
   const { hasActiveKey } = useApiKeys();
-  const [replies, setReplies] = React.useState<InboundReply[]>([]);
-  const [enabled, setEnabled] = React.useState<boolean>(false);
-  const [loading, setLoading] = React.useState(true);
+  const dispatch = useAppDispatch();
+  const { data: settings } = useGetEmailSettingsQuery();
+  const { data: replies = [], isLoading: loading, refetch } = useGetInboundRepliesQuery();
+  const enabled = !!settings?.enable_inbound;
+
   const [polling, setPolling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [info, setInfo] = React.useState<string | null>(null);
   const [drafts, setDrafts] = React.useState<Record<string, string>>({});
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const [s, r] = await Promise.all([
-        emailSettingsService.get().catch(() => null),
-        outreachService.listReplies().catch(() => [] as InboundReply[]),
-      ]);
-      setEnabled(!!s?.enable_inbound);
-      setReplies(r);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => { load(); }, [load]);
-
-  // Refresh when the notification stream reports new activity.
-  React.useEffect(() => {
-    const onUpdate = () => load();
-    window.addEventListener('prism:jobs-updated', onUpdate);
-    return () => window.removeEventListener('prism:jobs-updated', onUpdate);
-  }, [load]);
+  const removeReplyFromCache = (id: string) => {
+    dispatch(
+      prismApi.util.updateQueryData('getInboundReplies', undefined, (draft) => {
+        const index = draft.findIndex((x) => x.id === id);
+        if (index !== -1) draft.splice(index, 1);
+      })
+    );
+  };
 
   const handlePoll = async () => {
     setPolling(true);
@@ -69,7 +62,7 @@ export default function HrReplies({ status }: Props) {
       if (!res.enabled) setInfo('Inbound replies are off. Turn them on in Settings → Email Outreach.');
       else if (!res.inbound_ready) setError('Reconnect Gmail (Connect button) to grant read access for replies.');
       else setInfo(res.handled > 0 ? `Found ${res.handled} new repl${res.handled === 1 ? 'y' : 'ies'}.` : 'No new replies.');
-      await load();
+      await refetch();
     } catch (e: unknown) {
       setError(errMsg(e, 'Failed to check for replies.'));
     } finally {
@@ -83,7 +76,7 @@ export default function HrReplies({ status }: Props) {
     try {
       await outreachService.sendReply(r.id, drafts[r.id] ?? r.draft_reply ?? undefined);
       setInfo('Reply sent.');
-      setReplies(prev => prev.filter(x => x.id !== r.id));
+      removeReplyFromCache(r.id);
     } catch (e: unknown) {
       setError(errMsg(e, 'Failed to send the reply.'));
     } finally {
@@ -95,7 +88,7 @@ export default function HrReplies({ status }: Props) {
     setBusyId(id);
     try {
       await outreachService.dismissReply(id);
-      setReplies(prev => prev.filter(x => x.id !== id));
+      removeReplyFromCache(id);
     } catch {
       /* ignore */
     } finally {

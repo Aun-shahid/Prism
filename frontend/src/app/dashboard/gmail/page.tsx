@@ -3,50 +3,55 @@
 import * as React from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { gmailService, GmailStatus, EmailLog } from '../../../services/gmail';
-import { applicationsService, JobApplication } from '../../../services/applications';
-import { resumeService, GeneratedDocument } from '../../../services/resume';
 import ApplyByEmail from './ApplyByEmail';
 import HrReplies from './HrReplies';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Grid,
-  TextField,
-  Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Stack,
-  Alert,
-  CircularProgress,
-  Divider,
-  Paper,
-  List,
-  ListItem,
-  ListItemText,
-  Chip,
-  Tabs,
-  Tab,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import Divider from '@mui/material/Divider';
+import FormControl from '@mui/material/FormControl';
+import Grid from '@mui/material/Grid';
+import InputLabel from '@mui/material/InputLabel';
+import List from '@mui/material/List';
+import MenuItem from '@mui/material/MenuItem';
+import Paper from '@mui/material/Paper';
+import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import GoogleIcon from '@mui/icons-material/Google';
 import SendIcon from '@mui/icons-material/Send';
 import EmailIcon from '@mui/icons-material/Email';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import HistoryIcon from '@mui/icons-material/History';
-import InfoIcon from '@mui/icons-material/Info';
+import InfoIcon from '@mui/icons-material/InfoOutlined';
+import { useGetApplicationsQuery, useGetResumeHistoryQuery } from '../../../store/prismApi';
+import { useAppDispatch } from '../../../store/hooks';
+import { showToast } from '../../../store/uiSlice';
+import PageHeader from '../../../components/ui/PageHeader';
+import { useConfirm } from '../../../components/ui/ConfirmDialog';
+import { TableSkeleton } from '../../../components/ui/Skeletons';
 
 export default function GmailPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const dispatch = useAppDispatch();
+  const confirm = useConfirm();
   const appIdParam = searchParams.get('app_id');
 
-  // Integrations states
+  // Shared caches (deduped across pages)
+  const { data: applications = [] } = useGetApplicationsQuery();
+  const { data: historyDocs = [] } = useGetResumeHistoryQuery();
+
+  // Gmail-specific state
   const [status, setStatus] = React.useState<GmailStatus | null>(null);
-  const [applications, setApplications] = React.useState<JobApplication[]>([]);
   const [logs, setLogs] = React.useState<EmailLog[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
@@ -72,101 +77,88 @@ export default function GmailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Form compose states
+  // Compose form state
   const [selectedAppId, setSelectedAppId] = React.useState(appIdParam || '');
   const [recipient, setRecipient] = React.useState('');
   const [subject, setSubject] = React.useState('');
   const [body, setBody] = React.useState('');
 
-  const loadData = React.useCallback(async () => {
+  const findCoverLetter = React.useCallback(
+    (applicationId: string) =>
+      historyDocs.find((d) => d.application_id === applicationId && d.cover_letter_content)
+        ?.cover_letter_content || '',
+    [historyDocs]
+  );
+
+  const loadGmailData = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [statusData, appsData, logsData] = await Promise.all([
+      const [statusData, logsData] = await Promise.all([
         gmailService.getStatus(),
-        applicationsService.listApplications(),
-        gmailService.listSentEmails()
+        gmailService.listSentEmails(),
       ]);
       setStatus(statusData);
-      setApplications(appsData);
       setLogs(logsData.sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime()));
-      
-      // Prefill recipient if app_id is passed
-      if (appIdParam) {
-        const found = appsData.find(a => a.id === appIdParam);
-        if (found) {
-          if (found.contact_email) setRecipient(found.contact_email);
-          setSubject(`Application for ${found.position} - ${found.company}`);
-          
-          // Prefill body with tailored cover letter if it exists
-          try {
-            const historyDocs = await resumeService.listHistory();
-            const coverLetterDoc = historyDocs.find(
-              d => d.application_id === found.id && d.cover_letter_content
-            );
-            if (coverLetterDoc && coverLetterDoc.cover_letter_content) {
-              setBody(coverLetterDoc.cover_letter_content);
-            }
-          } catch (docErr) {
-            // Ignore cover letter prefill errors
-          }
-        }
-      }
-    } catch (err: any) {
+    } catch {
       setError('Gmail integration is disabled or offline. Configure client keys in settings or .env file.');
     } finally {
       setLoading(false);
     }
-  }, [appIdParam]);
+  }, []);
 
   React.useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadGmailData();
+  }, [loadGmailData]);
+
+  // Prefill from ?app_id= once the caches are available
+  const prefilledRef = React.useRef(false);
+  React.useEffect(() => {
+    if (prefilledRef.current || !appIdParam || applications.length === 0) return;
+    const found = applications.find((a) => a.id === appIdParam);
+    if (!found) return;
+    prefilledRef.current = true;
+    if (found.contact_email) setRecipient(found.contact_email);
+    setSubject(`Application for ${found.position} - ${found.company}`);
+    const coverLetter = findCoverLetter(found.id);
+    if (coverLetter) setBody(coverLetter);
+  }, [appIdParam, applications, findCoverLetter]);
 
   const handleConnect = async () => {
     setError(null);
     try {
       const consentUrl = await gmailService.getConnectUrl();
-      // Redirect to Google OAuth screen
       window.location.href = consentUrl;
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to start Gmail connection. Ensure OAuth variables are configured.');
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || 'Failed to start Gmail connection. Ensure OAuth variables are configured.');
     }
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect your Google account?')) return;
+    const ok = await confirm({
+      title: 'Disconnect Google account?',
+      body: 'Prism will no longer be able to send emails on your behalf until you reconnect.',
+      confirmLabel: 'Disconnect',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await gmailService.disconnect();
-      setSuccess('Gmail account disconnected.');
-      loadData();
-    } catch (err: any) {
-      setError('Failed to disconnect Google account.');
+      dispatch(showToast({ message: 'Gmail account disconnected', severity: 'success' }));
+      loadGmailData();
+    } catch {
+      dispatch(showToast({ message: 'Failed to disconnect Google account', severity: 'error' }));
     }
   };
 
-  const handleAppChange = async (id: string) => {
+  const handleAppChange = (id: string) => {
     setSelectedAppId(id);
-    const found = applications.find(a => a.id === id);
+    const found = applications.find((a) => a.id === id);
     if (found) {
-      if (found.contact_email) setRecipient(found.contact_email);
-      else setRecipient('');
+      setRecipient(found.contact_email || '');
       setSubject(`Application for ${found.position} - ${found.company}`);
-      
-      // Fetch matching cover letter
-      try {
-        const historyDocs = await resumeService.listHistory();
-        const coverLetterDoc = historyDocs.find(
-          d => d.application_id === found.id && d.cover_letter_content
-        );
-        if (coverLetterDoc && coverLetterDoc.cover_letter_content) {
-          setBody(coverLetterDoc.cover_letter_content);
-        } else {
-          setBody('');
-        }
-      } catch (docErr) {
-        setBody('');
-      }
+      setBody(findCoverLetter(found.id));
     } else {
       setRecipient('');
       setSubject('');
@@ -179,62 +171,60 @@ export default function GmailPage() {
     if (!recipient.trim() || !subject.trim() || !body.trim()) return;
     setSending(true);
     setError(null);
-    setSuccess(null);
     try {
       await gmailService.sendEmail({
         to: recipient,
         subject,
         body,
-        application_id: selectedAppId || undefined
+        application_id: selectedAppId || undefined,
       });
-      setSuccess('Outreach email sent successfully!');
-      
-      // Clear form
+      dispatch(showToast({ message: 'Outreach email sent successfully!', severity: 'success' }));
       setSelectedAppId('');
       setRecipient('');
       setSubject('');
       setBody('');
-      
-      // Reload logs
       const updatedLogs = await gmailService.listSentEmails();
       setLogs(updatedLogs.sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime()));
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to send email. Verify your Gmail OAuth connection works.');
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || 'Failed to send email. Verify your Gmail OAuth connection works.');
     } finally {
       setSending(false);
     }
   };
 
   if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <TableSkeleton />;
   }
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-          Gmail Outreach Workspace
-        </Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          Connect your Gmail account to send tailored cover letters and emails directly to recruiters.
-        </Typography>
-      </Box>
+      <PageHeader
+        title="Gmail Outreach Workspace"
+        subtitle="Connect your Gmail account to send tailored cover letters and emails directly to recruiters."
+      />
 
-      {error && <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>{success}</Alert>}
+      {error && (
+        <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>
+          {success}
+        </Alert>
+      )}
 
       {!status?.is_connected ? (
-        /* Not Connected View */
         <Card sx={{ textAlign: 'center', py: 6, mb: 4 }}>
           <CardContent>
             <EmailIcon sx={{ fontSize: 56, color: 'primary.main', opacity: 0.8, mb: 2 }} />
-            <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>Connect your Gmail Account</Typography>
+            <Typography variant="h5" sx={{ mb: 1 }}>
+              Connect your Gmail Account
+            </Typography>
             <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 500, mx: 'auto', mb: 4 }}>
-              Unlock the outreach center. Link your Google account securely to draft and mail personalized cover letters directly to recruiters from the dashboard.
+              Unlock the outreach center. Link your Google account securely to draft and mail
+              personalized cover letters directly to recruiters from the dashboard.
             </Typography>
             <Button
               variant="contained"
@@ -245,7 +235,7 @@ export default function GmailPage() {
                 color: '#fff',
                 px: 3,
                 py: 1.2,
-                '&:hover': { bgcolor: '#c53727' }
+                '&:hover': { bgcolor: '#c53727' },
               }}
             >
               Sign in with Google
@@ -254,42 +244,32 @@ export default function GmailPage() {
         </Card>
       ) : (
         <>
-          {/* Slim connection status bar */}
           <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="caption" sx={{ color: 'secondary.main' }}>
+            <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>
               Connected as: {status.google_email}
             </Typography>
-            <Button
-              variant="outlined"
-              color="error"
-              size="small"
-              startIcon={<LinkOffIcon />}
-              onClick={handleDisconnect}
-            >
+            <Button variant="outlined" color="error" size="small" startIcon={<LinkOffIcon />} onClick={handleDisconnect}>
               Disconnect
             </Button>
           </Stack>
 
-          <Tabs
-            value={tab}
-            onChange={(_e, v) => setTab(v)}
-            sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-          >
-            <Tab label="Apply by Email" sx={{ textTransform: 'none', fontWeight: 600 }} />
-            <Tab label="HR Replies" sx={{ textTransform: 'none', fontWeight: 600 }} />
-            <Tab label="Compose & History" sx={{ textTransform: 'none', fontWeight: 600 }} />
+          <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
+            <Tab label="Apply by Email" />
+            <Tab label="HR Replies" />
+            <Tab label="Compose & History" />
           </Tabs>
 
-          {tab === 0 && <ApplyByEmail status={status} onSent={loadData} />}
+          {tab === 0 && <ApplyByEmail status={status} onSent={loadGmailData} />}
           {tab === 1 && <HrReplies status={status} />}
 
           {tab === 2 && (
             <Grid container spacing={3}>
-              {/* Left panel: Compose Form */}
               <Grid size={{ xs: 12, md: 7 }}>
                 <Card>
                   <CardContent sx={{ p: 3 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 3 }}>Compose Outreach</Typography>
+                    <Typography variant="h6" sx={{ mb: 3 }}>
+                      Compose Outreach
+                    </Typography>
 
                     <Box component="form" onSubmit={handleSendEmail}>
                       <Stack spacing={3}>
@@ -302,7 +282,7 @@ export default function GmailPage() {
                             onChange={(e) => handleAppChange(e.target.value)}
                           >
                             <MenuItem value="">-- Select Application --</MenuItem>
-                            {applications.map(app => (
+                            {applications.map((app) => (
                               <MenuItem key={app.id} value={app.id}>
                                 {app.company} - {app.position}
                               </MenuItem>
@@ -354,13 +334,12 @@ export default function GmailPage() {
                 </Card>
               </Grid>
 
-              {/* Right panel: Sent History logs */}
               <Grid size={{ xs: 12, md: 5 }}>
                 <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                   <CardContent sx={{ p: 3, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
                     <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
                       <HistoryIcon />
-                      <Typography variant="h6" sx={{ fontWeight: 700 }}>Sent Outreach History</Typography>
+                      <Typography variant="h6">Sent Outreach History</Typography>
                     </Stack>
                     <Divider sx={{ mb: 2 }} />
 
@@ -373,9 +352,18 @@ export default function GmailPage() {
                       ) : (
                         <List dense>
                           {logs.map((log) => {
-                            const app = applications.find(a => a.id === log.application_id);
+                            const app = applications.find((a) => a.id === log.application_id);
                             return (
-                              <Paper key={log.id} sx={{ p: 2, mb: 1.5, bgcolor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                              <Paper
+                                key={log.id}
+                                sx={{
+                                  p: 2,
+                                  mb: 1.5,
+                                  bgcolor: 'rgba(15, 23, 42, 0.01)',
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                }}
+                              >
                                 <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 0.5 }}>
                                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                                     To: {log.to}
@@ -384,10 +372,14 @@ export default function GmailPage() {
                                     label={log.status.toUpperCase()}
                                     size="small"
                                     color={log.status === 'sent' ? 'success' : 'error'}
+                                    variant="outlined"
                                     sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }}
                                   />
                                 </Stack>
-                                <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: 'text.primary', mb: 0.5 }}>
+                                <Typography
+                                  variant="body2"
+                                  sx={{ fontSize: '0.85rem', fontWeight: 500, color: 'text.primary', mb: 0.5 }}
+                                >
                                   {log.subject}
                                 </Typography>
                                 {app && (

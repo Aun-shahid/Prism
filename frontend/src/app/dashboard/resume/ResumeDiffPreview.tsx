@@ -15,14 +15,14 @@ const mmToPx = (mm: number) => `${Math.round(mm * 3.7795)}px`;
 const ptToPx = (pt: number) => `${Math.round(pt * 1.333)}px`;
 
 const DIFF_BG: Record<DiffStatus, string> = {
-  added: 'rgba(16,185,129,0.16)',
+  added: 'rgba(5, 150, 105,0.16)',
   removed: 'rgba(239,68,68,0.13)',
   modified: 'rgba(245,158,11,0.18)',
   hidden: 'rgba(148,163,184,0.14)',
-  shown: 'rgba(16,185,129,0.12)',
+  shown: 'rgba(5, 150, 105,0.12)',
 };
 const DIFF_BORDER: Record<DiffStatus, string> = {
-  added: '#10b981', removed: '#ef4444', modified: '#f59e0b', hidden: '#94a3b8', shown: '#10b981',
+  added: 'var(--prism-palette-success-main)', removed: '#ef4444', modified: '#f59e0b', hidden: '#94a3b8', shown: 'var(--prism-palette-success-main)',
 };
 const DIFF_TAG: Record<DiffStatus, string> = {
   added: 'Added', removed: 'Removed', modified: 'Edited', hidden: 'Hidden', shown: 'Shown',

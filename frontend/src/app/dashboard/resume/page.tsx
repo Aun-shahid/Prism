@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import * as React from 'react';
 import {
@@ -32,8 +32,15 @@ import SyncIcon from '@mui/icons-material/Sync';
 import { useAuth } from '../../../hooks/useAuth';
 import { useApiKeys } from '../../../hooks/useApiKeys';
 import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
-import { profileService, UserProfile } from '../../../services/profile';
-import { applicationsService, JobApplication } from '../../../services/applications';
+import { UserProfile } from '../../../services/profile';
+import { JobApplication } from '../../../services/applications';
+import {
+  prismApi,
+  useGetApplicationsQuery,
+  useGetProfileQuery,
+  useGetResumeVersionsQuery,
+} from '../../../store/prismApi';
+import { useAppDispatch } from '../../../store/hooks';
 import { resumeService, TailorResult } from '../../../services/resume';
 import {
   resumeVersionApi,
@@ -308,9 +315,9 @@ function AiBulletField({
                 borderRadius: 1,
                 border: '1px solid',
                 borderColor: 'secondary.main',
-                bgcolor: 'rgba(16,185,129,0.06)',
+                bgcolor: 'rgba(5, 150, 105,0.06)',
                 cursor: 'pointer',
-                '&:hover': { bgcolor: 'rgba(16,185,129,0.12)' },
+                '&:hover': { bgcolor: 'rgba(5, 150, 105,0.12)' },
               }}
               onClick={() => apply(result.improved)}
             >
@@ -390,27 +397,32 @@ export default function ResumeBuilderPage() {
 
   const active = versions.find(v => v.id === activeId) ?? null;
 
-  // ─── Load data ─────────────────────────────────────────────────────────────
+  // ─── Load data (shared RTK Query caches — deduped across pages) ───────────
+  const dispatch = useAppDispatch();
+  const { data: cachedProfile, isError: profileLoadError } = useGetProfileQuery(undefined, { skip: !user });
+  const { data: cachedApps, isError: appsLoadError } = useGetApplicationsQuery(undefined, { skip: !user });
+  const { data: cachedVersions, isError: versionsLoadError } = useGetResumeVersionsQuery(undefined, {
+    skip: !user,
+  });
+
+  const initRef = React.useRef(false);
   React.useEffect(() => {
-    if (!user) return;
+    if (initRef.current || !user || !cachedProfile || !cachedApps || !cachedVersions) return;
+    initRef.current = true;
     (async () => {
       try {
-        const [prof, apps, vers] = await Promise.all([
-          profileService.getProfile(),
-          applicationsService.listApplications(),
-          resumeVersionApi.getAll(),
-        ]);
-        setProfile(prof);
-        setApplications(apps);
-        if (vers.length > 0) {
-          setVersions(vers);
-          setActiveId(vers[0].id);
-        } else if (prof) {
+        setProfile(cachedProfile);
+        setApplications(cachedApps);
+        if (cachedVersions.length > 0) {
+          setVersions(cachedVersions);
+          setActiveId(cachedVersions[0].id);
+        } else {
           // Create initial version from profile
-          const init = initVersionFromProfile(prof, user.name || '', user.email || '');
+          const init = initVersionFromProfile(cachedProfile, user.name || '', user.email || '');
           const created = await resumeVersionApi.create({ ...init, title: 'My Resume' });
           setVersions([created]);
           setActiveId(created.id);
+          dispatch(prismApi.util.invalidateTags(['ResumeVersions']));
         }
       } catch {
         setError('Failed to load resume data');
@@ -418,7 +430,14 @@ export default function ResumeBuilderPage() {
         setLoading(false);
       }
     })();
-  }, [user]);
+  }, [user, cachedProfile, cachedApps, cachedVersions, dispatch]);
+
+  React.useEffect(() => {
+    if (profileLoadError || appsLoadError || versionsLoadError) {
+      setError('Failed to load resume data');
+      setLoading(false);
+    }
+  }, [profileLoadError, appsLoadError, versionsLoadError]);
 
   // ─── Patch active version (debounced) ─────────────────────────────────────
   const patchTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -454,6 +473,7 @@ export default function ResumeBuilderPage() {
     setVersions(prev => [created, ...prev]);
     setActiveId(created.id);
     setVersionsOpen(false);
+    dispatch(prismApi.util.invalidateTags(['ResumeVersions']));
   };
 
   // ─── Duplicate ─────────────────────────────────────────────────────────────
@@ -461,6 +481,7 @@ export default function ResumeBuilderPage() {
     const dup = await resumeVersionApi.duplicate(id);
     setVersions(prev => [dup, ...prev]);
     setActiveId(dup.id);
+    dispatch(prismApi.util.invalidateTags(['ResumeVersions']));
   };
 
   // ─── Delete version ────────────────────────────────────────────────────────
@@ -469,12 +490,14 @@ export default function ResumeBuilderPage() {
     const remaining = versions.filter(v => v.id !== id);
     setVersions(remaining);
     if (activeId === id) setActiveId(remaining[0]?.id ?? null);
+    dispatch(prismApi.util.invalidateTags(['ResumeVersions']));
   };
 
   // ─── Rename ────────────────────────────────────────────────────────────────
   const handleRename = async (id: string, title: string) => {
     setVersions(prev => prev.map(v => v.id === id ? { ...v, title } : v));
     await resumeVersionApi.update(id, { title });
+    dispatch(prismApi.util.invalidateTags(['ResumeVersions']));
   };
 
   // ─── Favorite ──────────────────────────────────────────────────────────────
@@ -641,7 +664,7 @@ export default function ResumeBuilderPage() {
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', overflow: 'hidden', bgcolor: '#f1f5f9', mx: -3, mt: -3, mb: -3 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', overflow: 'hidden', mx: -3, mt: -3, mb: -3 }}>
         {/* ─── TOOLBAR ────────────────────────────────────────────────────── */}
         <AppBar position="static" color="default" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', zIndex: 10 }}>
           <Toolbar variant="dense" sx={{ gap: 1, minHeight: 48 }}>
@@ -713,7 +736,7 @@ export default function ResumeBuilderPage() {
                 </Typography>
               </Box>
               <Stack direction="row" sx={{ gap: 1.25, alignItems: 'center' }}>
-                {([['#10b981', 'Added'], ['#ef4444', 'Removed'], ['#f59e0b', 'Edited']] as [string, string][]).map(([col, lbl]) => (
+                {([['var(--prism-palette-success-main)', 'Added'], ['#ef4444', 'Removed'], ['#f59e0b', 'Edited']] as [string, string][]).map(([col, lbl]) => (
                   <Stack key={lbl} direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
                     <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: col }} />
                     <Typography variant="caption" color="text.secondary">{lbl}</Typography>

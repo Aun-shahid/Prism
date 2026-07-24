@@ -68,18 +68,18 @@ export default function GoogleTranslate() {
         }
         #google_translate_element .goog-te-gadget-simple {
           background: transparent;
-          border: 1px solid rgba(255, 255, 255, 0.16);
-          border-radius: 6px;
-          padding: 3px 6px;
+          border: 1px solid var(--prism-palette-divider);
+          border-radius: 8px;
+          padding: 4px 8px;
           display: inline-flex;
           align-items: center;
         }
         #google_translate_element .goog-te-gadget-simple .goog-te-menu-value {
-          color: rgba(255, 255, 255, 0.85);
+          color: var(--prism-palette-text-primary);
           font-size: 0.8rem;
         }
         #google_translate_element .goog-te-gadget-simple .goog-te-menu-value span {
-          color: rgba(255, 255, 255, 0.85);
+          color: var(--prism-palette-text-primary);
         }
         #google_translate_element img {
           display: none !important;

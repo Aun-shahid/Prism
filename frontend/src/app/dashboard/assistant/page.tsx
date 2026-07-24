@@ -38,6 +38,7 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import { useAuth } from '../../../hooks/useAuth';
 import { useApiKeys } from '../../../hooks/useApiKeys';
 import NoApiKeyTooltip from '../../../components/NoApiKeyTooltip';
+import { useConfirm } from '../../../components/ui/ConfirmDialog';
 import {
   assistantService,
   AgentStep,
@@ -110,12 +111,12 @@ function AgentTrace({ steps, sources }: { steps: AgentStep[]; sources: string[] 
             mt: 1,
             mb: 0.5,
             pl: 1.5,
-            borderLeft: '2px solid rgba(167,139,250,0.35)',
+            borderLeft: '2px solid rgba(13, 148, 136,0.35)',
           }}
         >
           {steps.map((step, i) => (
             <Stack key={i} direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-              <Box sx={{ color: '#a78bfa', mt: '1px', display: 'flex' }}>{stepIcon(step.type)}</Box>
+              <Box sx={{ color: 'var(--prism-palette-primary-main)', mt: '1px', display: 'flex' }}>{stepIcon(step.type)}</Box>
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', lineHeight: 1.4 }}>
                   {step.label}
@@ -171,7 +172,7 @@ function MarkdownBody({ content }: { content: string }) {
         '& li': { mb: 0.5 },
         '& h1, & h2, & h3, & h4': { mt: 1.5, mb: 0.75, fontWeight: 700, fontSize: '1rem' },
         '& code': {
-          bgcolor: 'rgba(255,255,255,0.08)',
+          bgcolor: 'rgba(15, 23, 42, 0.08)',
           px: 0.6,
           py: 0.1,
           borderRadius: 0.5,
@@ -185,13 +186,13 @@ function MarkdownBody({ content }: { content: string }) {
           '& code': { bgcolor: 'transparent', p: 0 },
         },
         '& blockquote': {
-          borderLeft: '3px solid rgba(167,139,250,0.5)',
+          borderLeft: '3px solid rgba(13, 148, 136,0.5)',
           pl: 1.5,
           ml: 0,
           color: 'text.secondary',
         },
-        '& a': { color: '#a78bfa' },
-        '& hr': { borderColor: 'rgba(255,255,255,0.1)', my: 1.5 },
+        '& a': { color: 'var(--prism-palette-primary-main)' },
+        '& hr': { borderColor: 'rgba(15, 23, 42, 0.1)', my: 1.5 },
       }}
     >
       <ReactMarkdown>{content}</ReactMarkdown>
@@ -202,6 +203,7 @@ function MarkdownBody({ content }: { content: string }) {
 export default function AssistantPage() {
   const { user } = useAuth();
   const { hasActiveKey } = useApiKeys();
+  const confirm = useConfirm();
   const [conversations, setConversations] = React.useState<ConversationSummary[]>([]);
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
@@ -277,7 +279,8 @@ export default function AssistantPage() {
 
   const removeConversation = async (id: string, event: React.MouseEvent) => {
     event.stopPropagation();
-    if (!confirm('Delete this conversation?')) return;
+    const ok = await confirm({ title: 'Delete this conversation?', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     try {
       await assistantService.deleteConversation(id);
       setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -456,7 +459,7 @@ export default function AssistantPage() {
           sx={{
             px: 2.5,
             py: 1.5,
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
             display: 'flex',
             alignItems: 'center',
             gap: 1.5,
@@ -466,7 +469,7 @@ export default function AssistantPage() {
             sx={{
               width: 34,
               height: 34,
-              background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
+              background: 'var(--prism-palette-primary-main)',
             }}
           >
             <AutoAwesomeIcon sx={{ fontSize: 18 }} />
@@ -520,12 +523,12 @@ export default function AssistantPage() {
                   width: 64,
                   height: 64,
                   borderRadius: 3,
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
+                  background: 'var(--prism-palette-primary-main)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   mb: 2.5,
-                  boxShadow: '0 8px 32px rgba(124,58,237,0.35)',
+                  boxShadow: '0 8px 32px rgba(13, 148, 136,0.35)',
                 }}
               >
                 <AutoAwesomeIcon sx={{ fontSize: 32, color: '#fff' }} />
@@ -551,9 +554,9 @@ export default function AssistantPage() {
                       py: 2.25,
                       px: 0.5,
                       fontSize: '0.82rem',
-                      border: '1px solid rgba(167,139,250,0.3)',
-                      bgcolor: 'rgba(124,58,237,0.08)',
-                      '&:hover': { bgcolor: 'rgba(124,58,237,0.18)' },
+                      border: '1px solid rgba(13, 148, 136,0.3)',
+                      bgcolor: 'rgba(13, 148, 136,0.08)',
+                      '&:hover': { bgcolor: 'rgba(13, 148, 136,0.18)' },
                     }}
                   />
                 ))}
@@ -575,8 +578,8 @@ export default function AssistantPage() {
                         px: 2,
                         py: 1.25,
                         maxWidth: '80%',
-                        bgcolor: 'rgba(124,58,237,0.18)',
-                        border: '1px solid rgba(167,139,250,0.25)',
+                        bgcolor: 'rgba(13, 148, 136,0.18)',
+                        border: '1px solid rgba(13, 148, 136,0.25)',
                         borderRadius: '14px 14px 4px 14px',
                       }}
                     >
@@ -591,8 +594,8 @@ export default function AssistantPage() {
                         sx={{
                           px: 2.5,
                           py: 2,
-                          bgcolor: 'rgba(255,255,255,0.025)',
-                          border: '1px solid rgba(255,255,255,0.08)',
+                          bgcolor: 'rgba(15, 23, 42, 0.025)',
+                          border: '1px solid rgba(15, 23, 42, 0.08)',
                           borderRadius: '4px 14px 14px 14px',
                           position: 'relative',
                           '&:hover .copy-btn': { opacity: 1 },
@@ -628,15 +631,15 @@ export default function AssistantPage() {
                     sx={{
                       px: 2.5,
                       py: 1.75,
-                      bgcolor: 'rgba(255,255,255,0.025)',
-                      border: '1px solid rgba(167,139,250,0.25)',
+                      bgcolor: 'rgba(15, 23, 42, 0.025)',
+                      border: '1px solid rgba(13, 148, 136,0.25)',
                       borderRadius: '4px 14px 14px 14px',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 1.5,
                     }}
                   >
-                    <CircularProgress size={16} sx={{ color: '#a78bfa' }} />
+                    <CircularProgress size={16} sx={{ color: 'var(--prism-palette-primary-main)' }} />
                     <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                       {THINKING_PHASES[thinkingPhase]}
                     </Typography>
@@ -649,7 +652,7 @@ export default function AssistantPage() {
         </Box>
 
         {/* Composer */}
-        <Box sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <Box sx={{ p: 2, borderTop: '1px solid rgba(15, 23, 42, 0.08)' }}>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-end', maxWidth: 760, mx: 'auto' }}>
             <TextField
               fullWidth
@@ -671,11 +674,11 @@ export default function AssistantPage() {
                   width: 44,
                   height: 44,
                   background: input.trim()
-                    ? 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)'
-                    : 'rgba(255,255,255,0.06)',
+                    ? 'var(--prism-palette-primary-main)'
+                    : 'rgba(15, 23, 42, 0.06)',
                   color: '#fff',
                   '&:hover': { opacity: 0.9 },
-                  '&.Mui-disabled': { color: 'rgba(255,255,255,0.3)' },
+                  '&.Mui-disabled': { color: 'rgba(15, 23, 42, 0.3)' },
                 }}
               >
                 <SendIcon sx={{ fontSize: 20 }} />

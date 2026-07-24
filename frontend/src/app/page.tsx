@@ -2,82 +2,75 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Box, 
-  Container, 
-  Typography, 
-  Button, 
-  Grid, 
-  Card, 
-  CardContent, 
-  AppBar, 
-  Toolbar, 
-  Stack, 
-  useTheme 
-} from '@mui/material';
-import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
+import Image from 'next/image';
+import AppBar from '@mui/material/AppBar';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
+import Container from '@mui/material/Container';
+import Divider from '@mui/material/Divider';
+import Grid from '@mui/material/Grid';
+import Stack from '@mui/material/Stack';
+import Toolbar from '@mui/material/Toolbar';
+import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import TrackChangesIcon from '@mui/icons-material/TrackChanges';
-import SecurityIcon from '@mui/icons-material/Security';
+import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
+import DescriptionIcon from '@mui/icons-material/Description';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { m } from 'motion/react';
+import ThemeToggle from '../components/ui/ThemeToggle';
+import HoverCard from '../components/ui/HoverCard';
+import GlassPanel from '../components/ui/GlassPanel';
+
+const FEATURES = [
+  {
+    icon: <AutoAwesomeIcon />,
+    title: 'AI Career Assistant',
+    description:
+      'An assistant that knows your experience, researches companies live, and drafts tailored emails and cover letters. Bring your own API key — no subscription.',
+  },
+  {
+    icon: <ViewKanbanIcon />,
+    title: 'Pipeline Tracking',
+    description:
+      'A kanban board for every application — from wishlist to offer. Statuses, salaries, contacts, notes and job descriptions in one place.',
+  },
+  {
+    icon: <TravelExploreIcon />,
+    title: 'Company Watchlist',
+    description:
+      'Name a company and AI finds its careers page, researches it, and monitors it for roles matching your target titles.',
+  },
+  {
+    icon: <DescriptionIcon />,
+    title: 'Resume Builder',
+    description:
+      'Versioned resumes with AI tailoring per job description, live preview, and one-click PDF or Word export.',
+  },
+];
 
 export default function LandingPage() {
   const router = useRouter();
-  const theme = useTheme();
-
-  const features = [
-    {
-      icon: <TrackChangesIcon sx={{ fontSize: 40, color: theme.palette.primary.main }} />,
-      title: 'Application Funnel',
-      description: 'Track your jobs from wishlist, applied, interviewing, through to receiving offers with a visual pipeline.',
-    },
-    {
-      icon: <AutoAwesomeIcon sx={{ fontSize: 40, color: theme.palette.secondary.main }} />,
-      title: 'AI Smart Insights',
-      description: 'Manage details of each job description, requirements, and align your applications for maximum response.',
-    },
-    {
-      icon: <DashboardCustomizeIcon sx={{ fontSize: 40, color: theme.palette.primary.main }} />,
-      title: 'Metrics & Statistics',
-      description: 'Observe conversion rates between resumes sent, interview calls, and offers to optimize your search.',
-    },
-    {
-      icon: <SecurityIcon sx={{ fontSize: 40, color: theme.palette.secondary.main }} />,
-      title: 'Secure & Private',
-      description: 'Your applications, contact info, and notes are securely stored on your own personal dashboard.',
-    },
-  ];
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header AppBar */}
-      <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+    <Box sx={{ minHeight: '100vh' }}>
+      {/* Nav */}
+      <AppBar position="static" elevation={0} sx={{ background: 'transparent', color: 'text.primary' }}>
         <Container maxWidth="lg">
-          <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 0, sm: 2 } }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box
-                component="img"
-                src="/prism_logo.png"
-                alt="Prism"
-                sx={{ width: 34, height: 34, objectFit: 'contain', display: 'block' }}
-              />
-              <Typography variant="h6" component="div" sx={{ fontWeight: 800, trackingWidth: -0.5 }}>
+          <Toolbar disableGutters sx={{ justifyContent: 'space-between' }}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+              <Image src="/prism_logo.png" alt="Prism" width={34} height={34} style={{ objectFit: 'contain' }} />
+              <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
                 Prism
               </Typography>
             </Stack>
-
-            <Stack direction="row" spacing={2}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+              <ThemeToggle />
               <Button color="inherit" onClick={() => router.push('/login')}>
                 Sign In
               </Button>
-              <Button 
-                variant="contained" 
-                color="primary"
-                onClick={() => router.push('/register')}
-                sx={{ 
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
-                  boxShadow: '0 4px 14px 0 rgba(124, 58, 237, 0.4)'
-                }}
-              >
+              <Button variant="contained" onClick={() => router.push('/register')}>
                 Get Started
               </Button>
             </Stack>
@@ -85,162 +78,190 @@ export default function LandingPage() {
         </Container>
       </AppBar>
 
-      {/* Hero Section */}
-      <Container maxWidth="lg" sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', py: { xs: 8, md: 12 } }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '7fr 5fr' }, gap: 6, alignItems: 'center', width: '100%' }}>
-          <Box>
-            <Box
-              component="img"
-              src="/logo.png"
-              alt="Prism"
+      {/* Hero */}
+      <Container maxWidth="lg">
+        <m.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+        >
+          <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center', pt: { xs: 8, md: 12 }, pb: 6 }}>
+            <Chip
+              label="Your job hunt, organized"
               sx={{
-                width: { xs: 260, md: 400 },
-                height: 'auto',
-                display: 'block',
-                mb: 1,
-                ml: { xs: -2, md: -3 },
-                filter: 'drop-shadow(0 8px 40px rgba(124, 58, 237, 0.25))',
+                bgcolor: 'rgba(13, 148, 136, 0.10)',
+                color: 'primary.dark',
+                fontWeight: 700,
               }}
             />
             <Typography
-              component="span"
-              variant="subtitle1"
+              variant="h1"
               sx={{
-                color: 'secondary.main',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: 1.5,
-                mb: 2,
-                display: 'inline-block'
-              }}
-            >
-              Your Personal Career Copilot
-            </Typography>
-            <Typography 
-              variant="h1" 
-              sx={{ 
-                fontSize: { xs: '2.5rem', sm: '3.5rem', md: '4.5rem' }, 
-                fontWeight: 800, 
+                fontSize: { xs: '2.5rem', sm: '3.25rem', md: '4rem' },
+                maxWidth: 820,
                 lineHeight: 1.1,
-                mb: 3,
-                background: 'linear-gradient(to right, #ffffff, #a78bfa)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
               }}
             >
-              Organize Your Job Search Effortlessly
-            </Typography>
-            <Typography variant="h5" sx={{ color: 'text.secondary', fontWeight: 400, mb: 4, lineHeight: 1.6, pr: { md: 4 } }}>
-              Prism is a premium personal assistant designed to help you track job applications, optimize your funnel, and secure your next role.
-            </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <Button 
-                variant="contained" 
-                size="large" 
-                color="primary"
-                onClick={() => router.push('/register')}
-                sx={{ 
-                  px: 4, 
-                  py: 1.5,
-                  fontSize: '1.1rem',
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #10b981 100%)',
-                  boxShadow: '0 6px 20px 0 rgba(124, 58, 237, 0.3)'
+              Track every application.{' '}
+              <Box
+                component="span"
+                sx={{
+                  background: 'linear-gradient(120deg, #0d9488, #042f2e)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
                 }}
               >
-                Create Free Account
-              </Button>
-              <Button 
-                variant="outlined" 
-                size="large" 
-                onClick={() => router.push('/login')}
-                sx={{ px: 4, py: 1.5, fontSize: '1.1rem', borderColor: 'rgba(255,255,255,0.2)' }}
+                Land the offer.
+              </Box>
+            </Typography>
+            <Typography variant="h6" sx={{ color: 'text.secondary', maxWidth: 640, fontWeight: 400 }}>
+              Prism is a personal job-application assistant: a pipeline tracker, an AI research
+              copilot, a resume builder and a recruiter outreach desk — in one calm workspace.
+            </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ pt: 1 }}>
+              <Button
+                variant="contained"
+                size="large"
+                endIcon={<ArrowForwardIcon />}
+                onClick={() => router.push('/register')}
+                sx={{ px: 4, py: 1.5 }}
               >
+                Start for free
+              </Button>
+              <Button variant="outlined" size="large" onClick={() => router.push('/login')} sx={{ px: 4, py: 1.5 }}>
                 Sign In
               </Button>
             </Stack>
-          </Box>
+          </Stack>
+        </m.div>
 
-          {/* Hero Decorative Visual */}
-          <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-            <Box 
-              sx={{ 
-                position: 'relative',
-                width: '100%',
-                height: 400,
-                borderRadius: 4,
-                overflow: 'hidden',
-                background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
-              }}
-            >
-              {/* Abstract Visual representation of dashboard */}
-              <Box sx={{ width: '80%', height: '70%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box sx={{ width: 100, height: 12, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }} />
-                  <Box sx={{ width: 50, height: 12, bgcolor: 'primary.main', borderRadius: 1, opacity: 0.8 }} />
-                </Box>
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
-                  {[1, 2, 3].map((item) => (
-                    <Box key={item} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Box sx={{ width: '60%', height: 8, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }} />
-                      <Box sx={{ width: '80%', height: 16, bgcolor: 'primary.main', borderRadius: 1, opacity: 0.5 + item*0.1 }} />
-                    </Box>
+        {/* Abstract product preview */}
+        <m.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.15, ease: 'easeOut' }}
+        >
+          <GlassPanel sx={{ borderRadius: 5, p: { xs: 2, md: 3 }, mb: 10, maxWidth: 900, mx: 'auto' }}>
+            <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+              {['#e11d48', '#f59e0b', '#059669'].map((c) => (
+                <Box key={c} sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: c, opacity: 0.6 }} />
+              ))}
+            </Stack>
+            <Grid container spacing={2}>
+              {[
+                { label: 'Applications', value: '32' },
+                { label: 'Interviewing', value: '5' },
+                { label: 'Offers', value: '2' },
+              ].map((stat) => (
+                <Grid key={stat.label} size={{ xs: 4 }}>
+                  <Box
+                    sx={{
+                      p: 2,
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  >
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                      {stat.label}
+                    </Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                      {stat.value}
+                    </Typography>
+                  </Box>
+                </Grid>
+              ))}
+              <Grid size={{ xs: 12 }}>
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 3,
+                    bgcolor: 'background.paper',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    gap: 1,
+                    height: 120,
+                  }}
+                >
+                  {[28, 42, 34, 56, 48, 70, 62, 84, 76, 92, 88, 100].map((h, i) => (
+                    <Box
+                      key={i}
+                      sx={{
+                        flex: 1,
+                        height: `${h}%`,
+                        borderRadius: 1,
+                        bgcolor: 'primary.main',
+                        opacity: 0.25 + (i / 12) * 0.6,
+                      }}
+                    />
                   ))}
                 </Box>
-                <Box sx={{ flexGrow: 1, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid rgba(255,255,255,0.05)', p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                  <Box sx={{ width: '30%', height: 10, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }} />
-                  {[1, 2].map((i) => (
-                    <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Box sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: i === 1 ? 'secondary.main' : 'primary.main' }} />
-                        <Box sx={{ width: 120, height: 8, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }} />
-                      </Stack>
-                      <Box sx={{ width: 60, height: 12, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }} />
-                    </Box>
-                  ))}
+              </Grid>
+            </Grid>
+          </GlassPanel>
+        </m.div>
+
+        {/* Features */}
+        <Typography variant="h3" sx={{ textAlign: 'center', mb: 1 }}>
+          Everything between &ldquo;applied&rdquo; and &ldquo;hired&rdquo;
+        </Typography>
+        <Typography variant="body1" sx={{ textAlign: 'center', color: 'text.secondary', mb: 5 }}>
+          Four tools that work off the same profile, so nothing is typed twice.
+        </Typography>
+        <Grid container spacing={2.5} sx={{ mb: 12 }}>
+          {FEATURES.map((feature) => (
+            <Grid key={feature.title} size={{ xs: 12, sm: 6, md: 3 }}>
+              <HoverCard sx={{ p: 3, height: '100%' }}>
+                <Box
+                  sx={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 2.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: 'rgba(13, 148, 136, 0.10)',
+                    color: 'primary.main',
+                    mb: 2,
+                  }}
+                >
+                  {feature.icon}
                 </Box>
-              </Box>
-            </Box>
-          </Box>
-        </Box>
+                <Typography variant="h6" sx={{ mb: 1 }}>
+                  {feature.title}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {feature.description}
+                </Typography>
+              </HoverCard>
+            </Grid>
+          ))}
+        </Grid>
       </Container>
 
-      {/* Feature Grid Section */}
-      <Box sx={{ bgcolor: 'rgba(255, 255, 255, 0.01)', borderTop: '1px solid rgba(255,255,255,0.04)', py: 10 }}>
-        <Container maxWidth="lg">
-          <Typography variant="h2" sx={{ textAlign: 'center', fontSize: '2.25rem', fontWeight: 800, mb: 8 }}>
-            Core Capabilities Built For You
-          </Typography>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 4 }}>
-            {features.map((feature, index) => (
-              <Card key={index} sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'rgba(255,255,255,0.02)', '&:hover': { transform: 'translateY(-5px)', transition: 'all 0.3s ease' } }}>
-                <CardContent sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Box>{feature.icon}</Box>
-                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                    {feature.title}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
-                    {feature.description}
-                  </Typography>
-                </CardContent>
-              </Card>
-            ))}
-          </Box>
-        </Container>
-      </Box>
-
       {/* Footer */}
-      <Box sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', py: 4, mt: 'auto' }}>
-        <Container maxWidth="lg">
-          <Typography variant="body2" align="center" sx={{ color: 'text.secondary' }}>
-            &copy; {new Date().getFullYear()} Prism. Built for job seekers. All rights reserved.
+      <Divider />
+      <Container maxWidth="lg">
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          sx={{ py: 4, alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Image src="/prism_logo.png" alt="Prism" width={22} height={22} style={{ objectFit: 'contain' }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Prism — Job Application Assistant
+            </Typography>
+          </Stack>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            Bring your own AI key. Your data stays yours.
           </Typography>
-        </Container>
-      </Box>
+        </Stack>
+      </Container>
     </Box>
   );
 }

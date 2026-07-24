@@ -1,55 +1,28 @@
 'use client';
 
 import * as React from 'react';
-import { apiKeysService } from '../services/apiKeys';
+import { useGetApiKeysQuery } from '../store/prismApi';
 
-interface ApiKeysContextType {
-  hasActiveKey: boolean;
-  activeProviders: string[];
-  loading: boolean;
-  refresh: () => Promise<void>;
-}
+/**
+ * Thin wrapper over the RTK Query api-keys cache. Keeps the pre-Redux return
+ * shape so consumers (NoApiKeyTooltip, assistant, settings, ...) are unchanged.
+ */
+export function useApiKeys() {
+  const { data, isLoading, refetch } = useGetApiKeysQuery();
 
-const ApiKeysContext = React.createContext<ApiKeysContextType | undefined>(undefined);
-
-export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
-  const [activeProviders, setActiveProviders] = React.useState<string[]>([]);
-  const [loading, setLoading] = React.useState<boolean>(true);
-
-  const refresh = React.useCallback(async () => {
-    try {
-      setLoading(true);
-      const keys = await apiKeysService.listKeys();
-      setActiveProviders(keys.filter(k => k.is_active).map(k => k.provider));
-    } catch {
-      // Endpoint may be briefly unavailable — leave the last known state alone
-      // rather than incorrectly disabling every AI action in the app.
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const value = React.useMemo(
-    () => ({
-      hasActiveKey: activeProviders.length > 0,
-      activeProviders,
-      loading,
-      refresh,
-    }),
-    [activeProviders, loading, refresh]
+  const activeProviders = React.useMemo(
+    () => (data ?? []).filter((k) => k.is_active).map((k) => k.provider as string),
+    [data]
   );
 
-  return <ApiKeysContext.Provider value={value}>{children}</ApiKeysContext.Provider>;
-}
+  const refresh = React.useCallback(async () => {
+    await refetch();
+  }, [refetch]);
 
-export function useApiKeys() {
-  const context = React.useContext(ApiKeysContext);
-  if (context === undefined) {
-    throw new Error('useApiKeys must be used within an ApiKeysProvider');
-  }
-  return context;
+  return {
+    hasActiveKey: activeProviders.length > 0,
+    activeProviders,
+    loading: isLoading,
+    refresh,
+  };
 }
